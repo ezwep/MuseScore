@@ -3844,6 +3844,22 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
       if (velo)
             scoreFollowNoteOn(pitch);
 
+      // While following live playing (outside note input) MuseScore must not play
+      // the incoming keys itself: that sound goes out via MIDI and reaches the
+      // organ a second time (MidiBridge reports the keys as doubled). A note-off is
+      // still passed on for a key whose note-on was, so no note can hang.
+      const bool silence = _scoreFollowOn && !cv->noteEntryMode();
+      const int key = channel * 128 + pitch;
+      bool pass;
+      if (velo) {
+            pass = !silence;
+            if (pass)
+                  _midiInPassed.insert(key);    // a suppressed note-on keeps an earlier obligation
+            }
+      else {
+            pass = !silence || _midiInPassed.contains(key);
+            _midiInPassed.remove(key);
+            }
 
       if (velo) {
              /*
@@ -3860,15 +3876,16 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
                   if (iterDrums >= THRESHOLD_DRUMS)
                         activeDrums = 0;
                   iterDrums = 0;
-                  cv->midiNoteReceived(pitch, activeDrums > 0, velo);
+                  if (pass)
+                        cv->midiNoteReceived(pitch, activeDrums > 0, velo);
                   }
-            else {
+            else if (pass) {        // suppressed keys must not count as a chord for note input
                   //qDebug("    midiNoteReceived %d active %d", pitch, active);
                   cv->midiNoteReceived(pitch, active > 0, velo);
                   ++active;
                   }
             }
-      else {
+      else if (pass) {
             /*
             * Since a note may be assigned to a midi_remote,
             * don't decrease active below zero on noteoff.
@@ -3879,6 +3896,7 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
                   --activeDrums;
             cv->midiNoteReceived(pitch, false, velo);
             }
+
 
       if (_pianoTools && _pianoTools->isVisible()) {
             if (velo)

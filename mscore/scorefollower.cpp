@@ -12,6 +12,9 @@
 
 #include "scorefollower.h"
 
+#include <climits>
+
+
 #include "libmscore/score.h"
 #include "libmscore/measure.h"
 #include "libmscore/segment.h"
@@ -45,10 +48,9 @@ void ScoreFollower::setScore(Score* s)
 void ScoreFollower::reset()
       {
       _cur     = -1;
-      _pending = -1;
       _misses  = 0;
       _matched.clear();
-      _pendingMatched.clear();
+      _evidence.clear();
       _history.clear();
       }
 
@@ -154,8 +156,7 @@ void ScoreFollower::setCurrent(int idx, const QSet<int>& consumed)
             _lastMove = _now;
       _cur     = idx;
       _matched = consumed;
-      _pending = -1;
-      _pendingMatched.clear();
+      _evidence.clear();
       _misses  = 0;
       }
 
@@ -179,26 +180,6 @@ int ScoreFollower::matchPitch(int idx, int pitch, const QSet<int>& consumed, boo
                   best = p;
             }
       return best;
-      }
-
-//---------------------------------------------------------
-//   findForward
-//    first event in [from, to] matching pitch
-//---------------------------------------------------------
-
-int ScoreFollower::findForward(int from, int to, int pitch, bool octave, int* scorePitch) const
-      {
-      from = qMax(from, 0);
-      to   = qMin(to, int(_events.size()) - 1);
-      static const QSet<int> none;
-      for (int i = from; i <= to; ++i) {
-            int sp = matchPitch(i, pitch, none, octave);
-            if (sp >= 0) {
-                  *scorePitch = sp;
-                  return i;
-                  }
-            }
-      return -1;
       }
 
 //---------------------------------------------------------
@@ -256,6 +237,89 @@ int ScoreFollower::recover() const
       }
 
 //---------------------------------------------------------
+//   evidenceCount
+//    number of different pitches of event idx played within
+//    the last EVIDENCE_MS; optionally whether one of them did
+//    not also fit the current chord, and the first/last time
+//---------------------------------------------------------
+
+int ScoreFollower::evidenceCount(int idx, bool* unexplained, qint64* first, qint64* last) const
+      {
+      if (unexplained)
+            *unexplained = false;
+      auto it = _evidence.constFind(idx);
+      if (it == _evidence.constEnd())
+            return 0;
+      int n = 0;
+      qint64 lo = LLONG_MAX, hi = LLONG_MIN;
+      for (const Evidence& e : it.value()) {
+            if (_now - e.time >= EVIDENCE_MS)
+                  continue;
+            ++n;
+            lo = qMin(lo, e.time);
+            hi = qMax(hi, e.time);
+            if (!e.explained && unexplained)
+                  *unexplained = true;
+            }
+      if (first)
+            *first = lo;
+      if (last)
+            *last = hi;
+      return n;
+      }
+
+//---------------------------------------------------------
+//   needed
+//    How many of its pitches must be played before we move to
+//    event idx. The next chord needs two (one for a single
+//    note); anything further away, or back, needs three, so
+//    that one or two wrong notes never move the position.
+//---------------------------------------------------------
+
+int ScoreFollower::needed(int idx) const
+      {
+      const int size = _events[idx].pitches.size();
+      if (idx == _cur + 1)
+            return qMin(2, size);
+      return qMin(3, size);
+      }
+
+//---------------------------------------------------------
+//   chooseCandidate
+//    nearest event (next one first, then alternately back and
+//    ahead) with enough evidence; -1 if none
+//---------------------------------------------------------
+
+int ScoreFollower::chooseCandidate() const
+      {
+      const int n = int(_events.size());
+      for (int d = 1; d <= qMax(WINDOW, BACK); ++d) {
+            for (int j : { _cur + d, _cur - d }) {
+                  if (j < 0 || j >= n || j < _cur - BACK || j > _cur + WINDOW)
+                        continue;
+                  const int need = needed(j);
+                  bool unexplained = false;
+                  qint64 first = 0;
+                  if (evidenceCount(j, &unexplained, &first) < need)
+                        continue;
+                  // at least one attack must not be explained by the current chord
+                  // (a late or re-voiced note of it), else repeated chords run ahead
+                  if (!unexplained)
+                        continue;
+                  // a far single note is too weak on its own: it must follow an
+                  // earlier, separate attack on the event before it
+                  if (need == 1 && j != _cur + 1) {
+                        qint64 prevFirst = 0;
+                        if (j == 0 || evidenceCount(j - 1, nullptr, &prevFirst) == 0 || prevFirst >= first)
+                              continue;
+                        }
+                  return j;
+                  }
+            }
+      return -1;
+      }
+
+//---------------------------------------------------------
 //   noteOn
 //---------------------------------------------------------
 
@@ -282,75 +346,57 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
       if (!hasPosition())
             setCurrent(0, QSet<int>());
 
-      int sp = -1;
-
-      // 1. exact, still unplayed note of the current chord
-      if (hasPosition() && (sp = matchPitch(_cur, pitch, _matched, false)) >= 0) {
-            if (_matched.isEmpty())
-                  _lastMove = _now;     // first attack of a chord we were positioned at: arm the chord window
-            _matched.insert(sp);
-            _misses  = 0;
-            _pending = -1;
-            _pendingMatched.clear();
-            return false;
-            }
-
-      // notes struck together with the chord we just moved to belong to that
-      // chord: they may only complete it (octave displaced), never move on
-      if (hasPosition() && _now - _lastMove < CHORD_MS) {
-            if ((sp = matchPitch(_cur, pitch, _matched, true)) >= 0)
+      // 1. notes struck together with the chord we just moved to belong to that
+      //    chord: they may only complete it, never move on
+      int sp = matchPitch(_cur, pitch, _matched, false);
+      if (_now - _lastMove < CHORD_MS) {
+            if (sp < 0)
+                  sp = matchPitch(_cur, pitch, _matched, true);
+            if (sp >= 0)
                   _matched.insert(sp);
             return false;
             }
 
-      // 2. confirm a pending larger jump: another note of that chord,
-      //    or a note of one of the chords right after it
-      if (_pending >= 0) {
-            if ((sp = matchPitch(_pending, pitch, _pendingMatched, false)) >= 0) {
-                  QSet<int> consumed = _pendingMatched;
-                  consumed.insert(sp);
-                  setCurrent(_pending, consumed);
-                  return true;
-                  }
-            int j = findForward(_pending + 1, _pending + DIRECT_JUMP, pitch, false, &sp);
-            if (j >= 0) {
-                  setCurrent(j, QSet<int>({ sp }));
-                  return true;
-                  }
-            _pending = -1;
-            _pendingMatched.clear();
+      // 2. a still unplayed note of the current chord, exact or an octave
+      //    displaced (pedal 16'), completes it
+      if (sp < 0)
+            sp = matchPitch(_cur, pitch, _matched, true);
+      const bool explained = sp >= 0;
+      if (explained) {
+            if (_matched.isEmpty())
+                  _lastMove = _now;     // first attack of a chord we were positioned at: arm the chord window
+            _matched.insert(sp);
+            _misses = 0;
             }
 
-      // 3. candidates: exact match ahead; octave match only within the current
-      //    chord (pedal 16'); an octave match ahead is too unreliable (4' couplers)
-      int spExact = -1;
-      const int jExact = findForward(_cur + 1, _cur + WINDOW, pitch, false, &spExact);
-      int spOct = -1;
-      if (hasPosition())
-            spOct = matchPitch(_cur, pitch, _matched, true);
+      // 3. every attack is evidence for the events around the current one
+      //    (exact pitches only: octave matches ahead are unreliable with 4' couplers)
+      const int n = int(_events.size());
+      bool anywhere = false;
+      for (int j = qMax(0, _cur - BACK); j <= qMin(n - 1, _cur + WINDOW); ++j) {
+            if (j != _cur && _events[j].pitches.contains(pitch)) {
+                  _evidence[j].insert(pitch, Evidence { _now, explained });
+                  anywhere = true;
+                  }
+            }
 
-      // While the current chord is incomplete an octave match in it (pedal 16')
-      // wins over an exact match ahead: lagging a little is better than running ahead.
-      if (spOct >= 0) {
-            if (_matched.isEmpty())
-                  _lastMove = _now;
-            _matched.insert(spOct);
+      // 4. move when an event has enough evidence
+      const int j = chooseCandidate();
+      if (j >= 0) {
+            QSet<int> consumed;
+            const auto& ev = _evidence[j];
+            for (auto it = ev.constBegin(); it != ev.constEnd(); ++it)
+                  if (_now - it.value().time < EVIDENCE_MS)
+                        consumed.insert(it.key());
+            setCurrent(j, consumed);
+            return true;
+            }
+      if (explained || anywhere) {
             _misses = 0;
             return false;
             }
-      if (jExact >= 0 && jExact - _cur <= DIRECT_JUMP) {
-            setCurrent(jExact, QSet<int>({ spExact }));
-            return true;
-            }
 
-
-      if (jExact >= 0) {
-            _pending = jExact;          // wait for a second note to confirm
-            _pendingMatched = QSet<int>({ spExact });
-            return false;
-            }
-
-      // 4. miss
+      // 5. miss: after several, search the whole score
       if (++_misses >= MAX_MISSES) {
             _misses = 0;
             int r = recover();

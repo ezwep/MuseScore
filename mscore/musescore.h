@@ -276,6 +276,8 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       const void* _scoreFollowSelKey       { nullptr };   // selection the follower was last anchored to (compared only)
       Fraction _scoreFollowSelTick         { -1, 1 };
       QPointer<ScoreView> _scoreFollowView;               // view showing the follow cursor
+      QSet<int> _midiInPassed;                            // keys whose note-on went to the score view (so their note-off does too)
+
 
       MediaDialog* _mediaDialog            { 0 };
       DrumTools* _drumTools                { 0 };

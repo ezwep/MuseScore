@@ -48,8 +48,13 @@ class ScoreFollower {
 
       int _cur             { -1 };      // index of the current event, -1 = not started
       QSet<int> _matched;               // score pitches of _cur already consumed
-      int _pending         { -1 };      // candidate for a larger jump, needs confirmation
-      QSet<int> _pendingMatched;        // score pitches of _pending consumed so far
+      // evidence: for candidate events near _cur, the pitches recently played that
+      // belong to them (pitch -> time). Cleared on every move.
+      struct Evidence {
+            qint64 time;
+            bool explained;           // the attack also fitted the current chord
+            };
+      QHash<int, QHash<int, Evidence>> _evidence;
       int _misses          { 0 };       // consecutive unmatched notes
       std::vector<int> _history;        // last played pitches (for recovery)
       QHash<int, qint64> _held;         // pitches currently down -> time pressed
@@ -62,14 +67,19 @@ class ScoreFollower {
       void rebuild();
       void setCurrent(int idx, const QSet<int>& consumed);
       int matchPitch(int idx, int pitch, const QSet<int>& consumed, bool octave) const;
-      int findForward(int from, int to, int pitch, bool octave, int* scorePitch) const;
+      int evidenceCount(int idx, bool* unexplained = nullptr, qint64* first = nullptr, qint64* last = nullptr) const;
+
+      int needed(int idx) const;
+      int chooseCandidate() const;
       bool fitsHistory(int last) const;
       int recover() const;
       int nearestRun(const Fraction& tick, int hint) const;
 
    public:
       static constexpr int WINDOW         = 8;   // look-ahead in events
-      static constexpr int DIRECT_JUMP    = 1;   // jumps up to this size are accepted at once
+      static constexpr int BACK           = 4;   // look-back in events (recover from a false advance)
+      static constexpr int EVIDENCE_MS    = 1500;// played pitches count as evidence this long
+
       static constexpr int CHORD_MS       = 60;  // notes within this time after a move belong to the same chord
 
       static constexpr int HELD_EXPIRE_MS = 20000; // forget a held key after this time (lost note-off)
