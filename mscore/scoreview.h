@@ -389,12 +389,18 @@ class ScoreView : public QWidget, public MuseScoreView {
       void startEdit(Element*, Grip) override;
       void startEditMode(Element*);
 
-      void moveCursor(const Fraction& tick);
+      void moveCursor(const Fraction& tick, bool forceVisible = false);
+
       void moveControlCursor(const Fraction& tick);
       bool isCursorDistanceReasonable();
       void moveControlCursorNearCursor();
       Fraction cursorTick() const;
       void setCursorOn(bool);
+      void followPosition(const Fraction& tick);
+      Fraction followNextSystem(const Fraction& fromTick);
+      bool systemFullyVisible(const System* sys) const;
+      void scrollSystemToTop(const System* sys);
+
       void setBackground(QPixmap*);
       void setBackground(const QColor&);
       void setForeground(QPixmap*);

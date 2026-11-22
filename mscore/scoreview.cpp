@@ -566,7 +566,7 @@ void ScoreView::dataChanged(const QRectF& r)
 //    move cursor during playback
 //---------------------------------------------------------
 
-void ScoreView::moveCursor(const Fraction& tick)
+void ScoreView::moveCursor(const Fraction& tick, bool forceVisible)
       {
       Measure* measure = score()->tick2measureMM(tick);
       if (measure == 0)
@@ -638,7 +638,7 @@ void ScoreView::moveCursor(const Fraction& tick)
       x -= _spatium;
       y -= 3 * _spatium;
 
-      if (mscore->playbackHighlight())
+      if (mscore->playbackHighlight() || forceVisible)
             _cursor->setRect(QRectF(x, y, w, h));
       else
             _cursor->setRect(QRectF());
@@ -3758,8 +3758,148 @@ void ScoreView::screenNext()
       }
 
 //---------------------------------------------------------
+//   nextMusicSystem
+//    next system that contains measures (skips vertical frames)
+//---------------------------------------------------------
+
+static System* nextMusicSystem(Score* score, const System* sys)
+      {
+      const QList<System*>& sl = score->systems();
+      for (int i = sl.indexOf(const_cast<System*>(sys)) + 1; i > 0 && i < sl.size(); ++i) {
+            if (sl[i]->firstMeasure())
+                  return sl[i];
+            }
+      return nullptr;
+      }
+
+//---------------------------------------------------------
+//   systemFullyVisible
+//    vertically completely in view and at least partly
+//    horizontally
+//---------------------------------------------------------
+
+bool ScoreView::systemFullyVisible(const System* sys) const
+      {
+      const QRectF view = toLogical(QRectF(0.0, 0.0, width(), height()));
+      const QRectF r    = sys->canvasBoundingRect();
+      return r.top() >= view.top() && r.bottom() <= view.bottom()
+             && r.left() < view.right() && r.right() > view.left();
+      }
+
+//---------------------------------------------------------
+//   scrollSystemToTop
+//---------------------------------------------------------
+
+void ScoreView::scrollSystemToTop(const System* sys)
+      {
+      const qreal zoom  = physicalZoomLevel();
+      const QRectF view = toLogical(QRectF(0.0, 0.0, width(), height()));
+      const QRectF r    = sys->canvasBoundingRect();
+      qreal x = xoffset();
+      if (r.left() < view.left() || r.right() > view.right()) {
+            // horizontally out of view: show the page from its left edge
+            // (or the system's, if the page does not fit)
+            const QRectF pr = sys->page()->canvasBoundingRect();
+            const qreal left = (pr.width() * zoom <= width()) ? pr.left() : r.left();
+            x = -left * zoom + thinPadding;
+            }
+      // a little room above the system for tempo marks, volta's etc.
+      const qreal y = -(r.top() - 2.0 * score()->spatium()) * zoom;
+      setConstrainedOffset(x, y);
+      update();
+      }
+
+//---------------------------------------------------------
+//   followPosition
+//    Show the live-playing position (score follower) with
+//    the cursor and scroll when the musician reaches the
+//    last visible system.
+//---------------------------------------------------------
+
+void ScoreView::followPosition(const Fraction& tick)
+      {
+      if (noteEntryMode() || score()->pages().empty())
+            return;
+      Measure* m = score()->tick2measureMM(tick);
+      if (!m)
+            return;
+      moveCursor(tick, true);
+      setCursorOn(true);
+
+      if (score()->layoutMode() == LayoutMode::LINE) {
+            // keep the position itself (not the measure: it can be wider than the view) in view
+            Segment* s = m->findSegment(SegmentType::ChordRest, tick);
+            if (!s)
+                  s = m->first(SegmentType::ChordRest);
+            const qreal zoom = physicalZoomLevel();
+            const qreal cx   = s ? s->canvasPos().x() : m->canvasPos().x();
+            const qreal scrX = cx * zoom + xoffset();
+            if (scrX > width() * 0.85 || scrX < width() * 0.02) {
+                  setConstrainedOffset(-cx * zoom + width() * 0.05, yoffset());
+                  update();
+                  }
+            return;
+            }
+
+
+      System* sys = m->system();
+      if (!sys)
+            return;
+      System* next = nextMusicSystem(score(), sys);
+      if (!systemFullyVisible(sys) || (next && !systemFullyVisible(next)))
+            scrollSystemToTop(sys);
+      }
+
+//---------------------------------------------------------
+//   followNextSystem
+//    "Next system" button/pedal: bring the system after the
+//    one at fromTick (or after the topmost visible one) to
+//    the top. Returns the start tick of that system, or -1.
+//---------------------------------------------------------
+
+Fraction ScoreView::followNextSystem(const Fraction& fromTick)
+      {
+      const Fraction none(-1, 1);
+      if (score()->pages().empty())
+            return none;
+      if (score()->layoutMode() == LayoutMode::LINE) {
+            screenNext();
+            return none;
+            }
+
+      const System* base = nullptr;
+      if (fromTick >= Fraction(0, 1)) {
+            Measure* m = score()->tick2measureMM(fromTick);
+            if (m && m->system() && systemFullyVisible(m->system()))
+                  base = m->system();
+            }
+      if (!base) {
+            // topmost (partly) visible system
+            const QRectF view = toLogical(QRectF(0.0, 0.0, width(), height()));
+            for (const System* s : score()->systems()) {
+                  if (!s->firstMeasure())
+                        continue;
+                  const QRectF r = s->canvasBoundingRect();
+                  if (r.bottom() > view.top() && r.top() < view.bottom()
+                      && r.left() < view.right() && r.right() > view.left()) {
+                        base = s;
+                        break;
+                        }
+                  }
+            }
+      if (!base)
+            return none;
+      System* next = nextMusicSystem(score(), base);
+      if (!next)
+            return none;
+      scrollSystemToTop(next);
+      return next->firstMeasure()->tick();
+      }
+
+//---------------------------------------------------------
 //   pagePrev
 //---------------------------------------------------------
+
 
 void ScoreView::pagePrev()
       {

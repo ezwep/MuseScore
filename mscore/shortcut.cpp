@@ -2524,6 +2524,24 @@ Shortcut Shortcut::_sc[] = {
       {
          MsWidget::MAIN_WINDOW,
          STATE_NORMAL | STATE_NOTE_ENTRY | STATE_PLAY,
+         "score-follow",
+         QT_TRANSLATE_NOOP("action","Follow Live Playing"),
+         QT_TRANSLATE_NOOP("action","Toggle 'Follow Live Playing'"),
+         QT_TRANSLATE_NOOP("action","Follow MIDI input while playing from the score and scroll automatically"),
+         Icons::Invalid_ICON,
+         Qt::WindowShortcut,
+         ShortcutFlags::A_SCORE | ShortcutFlags::A_CHECKABLE
+         },
+      {
+         MsWidget::SCORE_TAB,
+         STATE_NORMAL | STATE_NOTE_ENTRY | STATE_PLAY,
+         "score-follow-next",
+         QT_TRANSLATE_NOOP("action","Follow Live Playing: Next System"),
+         QT_TRANSLATE_NOOP("action","Follow live playing: scroll to next system"),
+         },
+      {
+         MsWidget::MAIN_WINDOW,
+         STATE_NORMAL | STATE_NOTE_ENTRY | STATE_PLAY,
          "load-style",
          QT_TRANSLATE_NOOP("action","Load Style…"),
          QT_TRANSLATE_NOOP("action","Load style"),

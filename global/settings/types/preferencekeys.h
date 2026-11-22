@@ -46,6 +46,7 @@
 #define PREF_APP_PLAYBACK_HIGHLIGHT                         "application/playback/highlight"
 #define PREF_APP_PLAYBACK_COUNTIN                           "application/playback/countin"
 #define PREF_APP_PLAYBACK_PANPLAYBACK                       "application/playback/panPlayback"
+#define PREF_APP_PLAYBACK_SCOREFOLLOW                       "application/playback/scoreFollow"
 #define PREF_APP_PLAYBACK_PLAYREPEATS                       "application/playback/playRepeats"
 #define PREF_APP_PLAYBACK_SPEEDINCREMENT                    "application/playback/speedIncrement"
 #define PREF_APP_PLAYBACK_LOOPTOSELECTIONONPLAY             "application/playback/setLoopToSelectionOnPlay"

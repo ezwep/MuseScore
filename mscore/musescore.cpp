@@ -50,6 +50,7 @@
 #include "pagesettings.h"
 #include "palette.h"
 #include "pianotools.h"
+#include "scorefollower.h"
 #include "playpanel.h"
 #include "preferences.h"
 #include "prefsdialog.h"
@@ -1555,6 +1556,8 @@ MuseScore::MuseScore()
       playbackHighlightAction = getAction("playback-highlight");
       countInAction   = getAction("countin");
       panAction       = getAction("pan");
+      _scoreFollowOn  = preferences.getBool(PREF_APP_PLAYBACK_SCOREFOLLOW);
+      getAction("score-follow")->setChecked(_scoreFollowOn);
 
       _statusBar = new QStatusBar;
       _statusBar->addPermanentWidget(new QWidget(this), 2);
@@ -1958,6 +1961,9 @@ MuseScore::MuseScore()
       a = getAction("toggle-piano");
       a->setCheckable(true);
       menuView->addAction(a);
+
+      menuView->addAction(getAction("score-follow"));
+      menuView->addAction(getAction("score-follow-next"));
 
       a = getAction("toggle-piano-roll");
       a->setCheckable(true);
@@ -2525,6 +2531,9 @@ MuseScore::~MuseScore()
       CocoaBridge::removeObservers();
 #endif
 
+      delete _scoreFollower;
+      _scoreFollower = nullptr;
+
       if (autoUpdater)
             autoUpdater->cleanup();
 
@@ -2938,6 +2947,7 @@ void MuseScore::selectionChanged(SelState selectionState)
             }
       if (_inspector)
             updateInspector();
+      scoreFollowSelectionChanged();
       }
 
 //---------------------------------------------------------
@@ -3210,6 +3220,14 @@ void MuseScore::setCurrentScoreView(ScoreView* view)
             cs = 0;
 
       scorePageLayoutChanged();
+
+      if (_scoreFollowView && _scoreFollowView != cv)
+            scoreFollowHideCursor();
+      if (_scoreFollower) {
+            _scoreFollower->setScore(_scoreFollowOn ? cs : nullptr);
+            _scoreFollowSelKey  = nullptr;
+            _scoreFollowSelTick = Fraction(-1, 1);
+            }
 
       updateWindowTitle(cs);
       setWindowModified(cs ? cs->dirty() : false);
@@ -3752,6 +3770,8 @@ bool MuseScore::processMidiRemote(MidiRemoteType type, int dta, int value)
                         case RMIDI_UNDO:    a = getAction("undo"); break;
                         case RMIDI_NOTE_EDIT_MODE: a = getAction("note-input");  break;
                         case RMIDI_REALTIME_ADVANCE: a = getAction("realtime-advance");  break;
+                        case RMIDI_SCORE_FOLLOW_NEXT: a = getAction("score-follow-next");  break;
+
                         }
                   if (a)
                         a->trigger();
@@ -3796,6 +3816,9 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
             active = 0;
             return;
             }
+      if (velo && channel != 0x09)
+            scoreFollowNoteOn(pitch);
+
       if (velo) {
              /*
              * Since some drum modules do not overlap note on / off messages
@@ -7031,6 +7054,141 @@ void MuseScore::setPanPlayback(bool pan)
       }
 
 //---------------------------------------------------------
+//   scoreFollowReady
+//    Is the score follower on and may it act on the current
+//    score view now? (not during note input or playback)
+//---------------------------------------------------------
+
+bool MuseScore::scoreFollowReady()
+      {
+      if (!_scoreFollowOn || !cv || !cs || cv->noteEntryMode() || (seq && seq->isPlaying()))
+            return false;
+      if (!_scoreFollower)
+            _scoreFollower = new ScoreFollower;
+      _scoreFollower->setScore(cs);
+      return true;
+      }
+
+//---------------------------------------------------------
+//   setScoreFollow
+//    "Follow live playing" on/off
+//---------------------------------------------------------
+
+void MuseScore::setScoreFollow(bool on)
+      {
+      getAction("score-follow")->setChecked(on);
+      preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW, on);
+      _scoreFollowOn      = on;
+      _scoreFollowSelKey  = nullptr;
+      _scoreFollowSelTick = Fraction(-1, 1);
+      if (on) {
+            if (scoreFollowReady()) {
+                  _scoreFollower->reset();
+                  scoreFollowSelectionChanged();
+                  }
+            }
+      else {
+            if (_scoreFollower)
+                  _scoreFollower->setScore(nullptr);
+            scoreFollowHideCursor();
+            }
+      }
+
+//---------------------------------------------------------
+//   scoreFollowHideCursor
+//    hide the follow cursor, unless playback or note input
+//    owns the cursor now
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowHideCursor()
+      {
+      ScoreView* v = _scoreFollowView;
+      _scoreFollowView = nullptr;
+      if (v && !v->noteEntryMode() && (!seq || !seq->isPlaying()))
+            v->setCursorOn(false);
+      }
+
+//---------------------------------------------------------
+//   scoreFollowNoteOn
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowNoteOn(int pitch)
+      {
+      if (!scoreFollowReady())
+            return;
+      if (_scoreFollower->noteOn(pitch)) {
+            // the position moved away from the selection: clicking the
+            // selected note again must re-anchor
+            _scoreFollowSelKey  = nullptr;
+            _scoreFollowSelTick = Fraction(-1, 1);
+            scoreFollowUpdateView();
+            }
+      }
+
+//---------------------------------------------------------
+//   scoreFollowSelectionChanged
+//    Clicking a note (re)starts following from there.
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowSelectionChanged()
+      {
+      if (!scoreFollowReady())
+            return;
+      const Selection& sel = cs->selection();
+      if (sel.isNone()) {
+            _scoreFollowSelKey  = nullptr;
+            _scoreFollowSelTick = Fraction(-1, 1);
+            return;
+            }
+      const void* key = sel.element() ? static_cast<const void*>(sel.element()) : static_cast<const void*>(sel.startSegment());
+      const Fraction t = sel.cr() ? sel.cr()->tick() : sel.tickStart();
+      if (key == _scoreFollowSelKey && t == _scoreFollowSelTick)
+            return;
+      _scoreFollowSelKey  = key;
+      _scoreFollowSelTick = t;
+      if (t >= Fraction(0, 1) && _scoreFollower->setPosition(t))
+            scoreFollowUpdateView();
+      }
+
+//---------------------------------------------------------
+//   scoreFollowUpdateView
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowUpdateView()
+      {
+      if (cv && _scoreFollower && _scoreFollower->hasPosition()) {
+            cv->followPosition(_scoreFollower->tick());
+            _scoreFollowView = cv;
+            }
+      }
+
+//---------------------------------------------------------
+//   scoreFollowNext
+//    "Next system" (key, pedal): scroll on by one system and,
+//    when following, continue from there.
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowNext()
+      {
+      if (!cv)
+            return;
+      const bool follow = scoreFollowReady();
+      const Fraction from = (follow && _scoreFollower->hasPosition()) ? _scoreFollower->tick() : Fraction(-1, 1);
+      const Fraction t = cv->followNextSystem(from);
+      if (!follow || t < Fraction(0, 1))
+            return;
+      if (_scoreFollower->advanceTo(t) || _scoreFollower->setPosition(t)) {
+            cv->moveCursor(_scoreFollower->tick(), true);
+            cv->setCursorOn(true);
+            _scoreFollowView    = cv;
+            _scoreFollowSelKey  = nullptr;
+            _scoreFollowSelTick = Fraction(-1, 1);
+            }
+
+      }
+
+
+//---------------------------------------------------------
 //   setPlayPartOnly
 //---------------------------------------------------------
 
@@ -7326,6 +7484,10 @@ void MuseScore::cmd(QAction* a, const QString& cmd)
             setPlayRepeats(a->isChecked());
       else if (cmd == "pan")
             setPanPlayback(a->isChecked());
+      else if (cmd == "score-follow")
+            setScoreFollow(a->isChecked());
+      else if (cmd == "score-follow-next")
+            scoreFollowNext();
       else if (cmd == "mark-irregular") {
             cs->setMarkIrregularMeasures(a->isChecked());
             cs->update();

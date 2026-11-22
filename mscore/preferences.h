@@ -61,7 +61,9 @@ enum {
       RMIDI_UNDO,
       RMIDI_NOTE_EDIT_MODE,
       RMIDI_REALTIME_ADVANCE,
+      RMIDI_SCORE_FOLLOW_NEXT,
       MIDI_REMOTES
+
       };
 
 // The "theme" the user chooses in Preferences

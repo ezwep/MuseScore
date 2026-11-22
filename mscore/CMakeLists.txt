@@ -222,7 +222,7 @@ add_library(mscoreapp STATIC
       measureproperties.h mediadialog.h metaedit.h
       mssplashscreen.h musescore.h navigator.h newwizard.h noteGroups.h
       omrpanel.h pagesettings.h palette.h partedit.h parteditbase.h
-      pathlistdialog.h piano.h  pianotools.h
+      pathlistdialog.h piano.h  pianotools.h scorefollower.h
       openfilelocation.h
       playpanel.h preferenceslistwidget.h prefsdialog.h
       radiobuttongroupbox.h recordbutton.h resourceManager.h ruler.h scoreaccessibility.h
@@ -265,7 +265,7 @@ add_library(mscoreapp STATIC
       ruler.cpp
       fotomode.cpp drumtools.cpp
       selinstrument.cpp editstafftype.cpp texttools.cpp
-      editpitch.cpp editstringdata.cpp editraster.cpp pianotools.cpp mediadialog.cpp
+      editpitch.cpp editstringdata.cpp editraster.cpp pianotools.cpp scorefollower.cpp mediadialog.cpp
       workspace.cpp workspacedialog.cpp chordview.cpp
       workspacecombobox.cpp
       albummanager.cpp

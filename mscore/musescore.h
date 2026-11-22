@@ -77,6 +77,7 @@ class ChordStyleEditor;
 class Navigator;
 class Timeline;
 class PianoTools;
+class ScoreFollower;
 class MediaDialog;
 class Workspace;
 class WorkspaceDialog;
@@ -270,6 +271,12 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       QToolBar* workspacesTools;
       TextTools* _textTools                { 0 };
       PianoTools* _pianoTools              { 0 };
+      ScoreFollower* _scoreFollower        { nullptr };
+      bool _scoreFollowOn                  { false };
+      const void* _scoreFollowSelKey       { nullptr };   // selection the follower was last anchored to (compared only)
+      Fraction _scoreFollowSelTick         { -1, 1 };
+      QPointer<ScoreView> _scoreFollowView;               // view showing the follow cursor
+
       MediaDialog* _mediaDialog            { 0 };
       DrumTools* _drumTools                { 0 };
       QToolBar* voiceTools;
@@ -507,6 +514,16 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       void switchLayoutMode(LayoutMode);
       void setPlayRepeats(bool repeat);
       void setPanPlayback(bool pan);
+      void setScoreFollow(bool on);
+      void scoreFollowNext();
+      void scoreFollowSelectionChanged();
+      void scoreFollowUpdateView();
+      void scoreFollowNoteOn(int pitch);
+      bool scoreFollowReady();
+      void scoreFollowHideCursor();
+
+
+
 
       void createPlayPanel();
 
