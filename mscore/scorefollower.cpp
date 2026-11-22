@@ -150,6 +150,8 @@ void ScoreFollower::rebuild()
 
 void ScoreFollower::setCurrent(int idx, const QSet<int>& consumed)
       {
+      if (idx != _cur)
+            _lastMove = _now;
       _cur     = idx;
       _matched = consumed;
       _pending = -1;
@@ -257,8 +259,16 @@ int ScoreFollower::recover() const
 //   noteOn
 //---------------------------------------------------------
 
-bool ScoreFollower::noteOn(int pitch)
+bool ScoreFollower::noteOn(int pitch, qint64 ms)
       {
+      // A key that is already down sends no new attack: ignore repeated
+      // note-ons (MIDI echo/thru, couplers on other channels).
+      auto held = _held.constFind(pitch);
+      if (held != _held.constEnd() && ms - held.value() < HELD_EXPIRE_MS)
+            return false;
+      _held.insert(pitch, ms);
+      _now = ms;
+
       if (!ensureEvents())
             return false;
 
@@ -266,14 +276,30 @@ bool ScoreFollower::noteOn(int pitch)
       if (int(_history.size()) > HISTORY)
             _history.erase(_history.begin());
 
+      // Not positioned yet (no note clicked): start at the first chord. Letting
+      // the first incoming note pick any chord in the look-ahead window made an
+      // early pedal note jump straight to the third chord.
+      if (!hasPosition())
+            setCurrent(0, QSet<int>());
+
       int sp = -1;
 
       // 1. exact, still unplayed note of the current chord
       if (hasPosition() && (sp = matchPitch(_cur, pitch, _matched, false)) >= 0) {
+            if (_matched.isEmpty())
+                  _lastMove = _now;     // first attack of a chord we were positioned at: arm the chord window
             _matched.insert(sp);
             _misses  = 0;
             _pending = -1;
             _pendingMatched.clear();
+            return false;
+            }
+
+      // notes struck together with the chord we just moved to belong to that
+      // chord: they may only complete it (octave displaced), never move on
+      if (hasPosition() && _now - _lastMove < CHORD_MS) {
+            if ((sp = matchPitch(_cur, pitch, _matched, true)) >= 0)
+                  _matched.insert(sp);
             return false;
             }
 
@@ -295,30 +321,29 @@ bool ScoreFollower::noteOn(int pitch)
             _pendingMatched.clear();
             }
 
-      // 3. candidates: exact match ahead; octave match in the current or a nearby chord
+      // 3. candidates: exact match ahead; octave match only within the current
+      //    chord (pedal 16'); an octave match ahead is too unreliable (4' couplers)
       int spExact = -1;
       const int jExact = findForward(_cur + 1, _cur + WINDOW, pitch, false, &spExact);
       int spOct = -1;
-      int jOct  = -1;
-      if (hasPosition() && (spOct = matchPitch(_cur, pitch, _matched, true)) >= 0)
-            jOct = _cur;
-      else
-            jOct = findForward(_cur + 1, _cur + DIRECT_JUMP, pitch, true, &spOct);
+      if (hasPosition())
+            spOct = matchPitch(_cur, pitch, _matched, true);
 
-      // a nearby exact match beats an octave match
-      if (jExact >= 0 && (jExact - _cur <= DIRECT_JUMP || !hasPosition())) {
+      // While the current chord is incomplete an octave match in it (pedal 16')
+      // wins over an exact match ahead: lagging a little is better than running ahead.
+      if (spOct >= 0) {
+            if (_matched.isEmpty())
+                  _lastMove = _now;
+            _matched.insert(spOct);
+            _misses = 0;
+            return false;
+            }
+      if (jExact >= 0 && jExact - _cur <= DIRECT_JUMP) {
             setCurrent(jExact, QSet<int>({ spExact }));
             return true;
             }
-      if (jOct >= 0) {
-            if (jOct == _cur) {
-                  _matched.insert(spOct);
-                  _misses = 0;
-                  return false;
-                  }
-            setCurrent(jOct, QSet<int>({ spOct }));
-            return true;
-            }
+
+
       if (jExact >= 0) {
             _pending = jExact;          // wait for a second note to confirm
             _pendingMatched = QSet<int>({ spExact });
@@ -377,11 +402,27 @@ bool ScoreFollower::setPosition(const Fraction& t)
             return false;
       setCurrent(idx, QSet<int>());
       _history.clear();
+      _lastMove = -1000000;
+      return true;
+      }
+
+//---------------------------------------------------------
+//   restart
+//---------------------------------------------------------
+
+bool ScoreFollower::restart()
+      {
+      if (!ensureEvents())
+            return false;
+      setCurrent(0, QSet<int>());
+      _history.clear();
+      _lastMove = -1000000;
       return true;
       }
 
 //---------------------------------------------------------
 //   advanceTo
+
 //    Move forward to the first event at or after tick. A
 //    repeat jump before reaching it counts as the destination
 //    (it is what will be played next). Never moves backward.
@@ -398,7 +439,9 @@ bool ScoreFollower::advanceTo(const Fraction& t)
             if (_events[i].tick < _events[i - 1].tick || _events[i].tick >= t) {
                   setCurrent(i, QSet<int>());
                   _history.clear();
+                  _lastMove = -1000000;
                   return true;
+
                   }
             }
       return false;

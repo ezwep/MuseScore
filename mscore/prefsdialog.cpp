@@ -257,6 +257,7 @@ PreferenceDialog::PreferenceDialog(QWidget* parent)
       recordButtons->addButton(recordEditMode, RMIDI_NOTE_EDIT_MODE);
       recordButtons->addButton(recordRealtimeAdvance, RMIDI_REALTIME_ADVANCE);
       recordButtons->addButton(recordScoreFollowNext, RMIDI_SCORE_FOLLOW_NEXT);
+      recordButtons->addButton(recordScoreFollowReset, RMIDI_SCORE_FOLLOW_RESET);
 
       connect(recordButtons,              QOverload<int>::of(&QButtonGroup::idClicked), this, &PreferenceDialog::recordButtonClicked);
       connect(midiRemoteControlClear,     &QToolButton::clicked, this, &PreferenceDialog::midiRemoteControlClearClicked);
@@ -641,6 +642,7 @@ void PreferenceDialog::updateRemote()
       editModeActive->setChecked(preferences.midiRemote(RMIDI_NOTE_EDIT_MODE).type != -1);
       realtimeAdvanceActive->setChecked(preferences.midiRemote(RMIDI_REALTIME_ADVANCE).type != -1);
       scoreFollowNextActive->setChecked(preferences.midiRemote(RMIDI_SCORE_FOLLOW_NEXT).type != -1);
+      scoreFollowResetActive->setChecked(preferences.midiRemote(RMIDI_SCORE_FOLLOW_RESET).type != -1);
 
       int id = mscore->midiRecordId();
       recordRewind->setChecked(id == RMIDI_REWIND);
@@ -662,6 +664,8 @@ void PreferenceDialog::updateRemote()
       recordEditMode->setChecked(id == RMIDI_NOTE_EDIT_MODE);
       recordRealtimeAdvance->setChecked(id == RMIDI_REALTIME_ADVANCE);
       recordScoreFollowNext->setChecked(id == RMIDI_SCORE_FOLLOW_NEXT);
+      recordScoreFollowReset->setChecked(id == RMIDI_SCORE_FOLLOW_RESET);
+
 
       }
 

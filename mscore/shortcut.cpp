@@ -2540,6 +2540,14 @@ Shortcut Shortcut::_sc[] = {
          QT_TRANSLATE_NOOP("action","Follow live playing: scroll to next system"),
          },
       {
+         MsWidget::SCORE_TAB,
+         STATE_NORMAL | STATE_NOTE_ENTRY | STATE_PLAY,
+         "score-follow-reset",
+         QT_TRANSLATE_NOOP("action","Follow Live Playing: Reset"),
+         QT_TRANSLATE_NOOP("action","Follow live playing: back to the beginning"),
+         },
+
+      {
          MsWidget::MAIN_WINDOW,
          STATE_NORMAL | STATE_NOTE_ENTRY | STATE_PLAY,
          "load-style",

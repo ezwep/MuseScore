@@ -3845,10 +3845,22 @@ void ScoreView::followPosition(const Fraction& tick)
       System* sys = m->system();
       if (!sys)
             return;
-      System* next = nextMusicSystem(score(), sys);
-      if (!systemFullyVisible(sys) || (next && !systemFullyVisible(next)))
+      if (!systemFullyVisible(sys)) {
             scrollSystemToTop(sys);
+            return;
+            }
+      // On the last fully visible system: scroll once the player is
+      // halfway through it, so the line can still be read at the bottom.
+      System* next = nextMusicSystem(score(), sys);
+      if (next && !systemFullyVisible(next)) {
+            const QRectF sr = sys->canvasBoundingRect();
+            Segment* s = m->findSegment(SegmentType::ChordRest, tick);
+            const qreal cx = s ? s->canvasPos().x() : m->canvasPos().x();
+            if (cx >= sr.left() + sr.width() * 0.5)
+                  scrollSystemToTop(sys);
+            }
       }
+
 
 //---------------------------------------------------------
 //   followNextSystem

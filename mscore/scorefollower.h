@@ -15,6 +15,8 @@
 
 #include <vector>
 #include <QSet>
+#include <QHash>
+#include <QElapsedTimer>
 #include "libmscore/fraction.h"
 
 
@@ -50,6 +52,10 @@ class ScoreFollower {
       QSet<int> _pendingMatched;        // score pitches of _pending consumed so far
       int _misses          { 0 };       // consecutive unmatched notes
       std::vector<int> _history;        // last played pitches (for recovery)
+      QHash<int, qint64> _held;         // pitches currently down -> time pressed
+      qint64 _now          { 0 };       // time of the note being processed (ms)
+      qint64 _lastMove     { -1000000 };// time of the last forward move (ms)
+      QElapsedTimer _clock;
 
       bool needsRebuild() const;
       bool ensureEvents();
@@ -63,7 +69,10 @@ class ScoreFollower {
 
    public:
       static constexpr int WINDOW         = 8;   // look-ahead in events
-      static constexpr int DIRECT_JUMP    = 2;   // jumps up to this size are accepted at once
+      static constexpr int DIRECT_JUMP    = 1;   // jumps up to this size are accepted at once
+      static constexpr int CHORD_MS       = 60;  // notes within this time after a move belong to the same chord
+
+      static constexpr int HELD_EXPIRE_MS = 20000; // forget a held key after this time (lost note-off)
       static constexpr int MAX_MISSES     = 6;   // misses before a global recovery search
       static constexpr int HISTORY        = 4;   // pitches used for recovery
       static constexpr int RECOVER_SPAN   = 2;   // max spread of recovery candidates
@@ -76,8 +85,17 @@ class ScoreFollower {
       // Returns true when a position was found.
       bool setPosition(const Fraction& tick);
 
+      // Back to the very first chord of the score.
+      bool restart();
+
+
+      ScoreFollower() { _clock.start(); }
+
       // Feed a note-on. Returns true when the position changed.
-      bool noteOn(int pitch);
+      bool noteOn(int pitch)               { return noteOn(pitch, _clock.elapsed()); }
+      bool noteOn(int pitch, qint64 ms);
+      void noteOff(int pitch)              { _held.remove(pitch); }
+
 
       // Moves forward to the first event at or after tick; a repeat jump on
       // the way counts as destination. Never moves backward.

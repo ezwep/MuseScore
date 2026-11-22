@@ -1730,6 +1730,23 @@ MuseScore::MuseScore()
       populatePlaybackControls();
 
       //-------------------------------
+      //    Follow Live Playing Tool Bar
+      //-------------------------------
+
+      QToolBar* followTools = addToolBar(tr("Follow Live Playing"));
+      followTools->setObjectName("follow-tools");
+      followTools->setToolButtonStyle(Qt::ToolButtonTextOnly);
+      // Dutch labels on purpose (personal build); the actions' menu texts stay translatable
+      getAction("score-follow")->setIconText(QStringLiteral("Meelezen"));
+      getAction("score-follow-next")->setIconText(QStringLiteral("Volgende regel"));
+      getAction("score-follow-reset")->setIconText(QStringLiteral("Opnieuw"));
+
+      followTools->addAction(getAction("score-follow"));
+      followTools->addAction(getAction("score-follow-next"));
+      followTools->addAction(getAction("score-follow-reset"));
+
+
+      //-------------------------------
       //    Concert Pitch Tool Bar
       //-------------------------------
 
@@ -1964,6 +1981,7 @@ MuseScore::MuseScore()
 
       menuView->addAction(getAction("score-follow"));
       menuView->addAction(getAction("score-follow-next"));
+      menuView->addAction(getAction("score-follow-reset"));
 
       a = getAction("toggle-piano-roll");
       a->setCheckable(true);
@@ -3771,6 +3789,7 @@ bool MuseScore::processMidiRemote(MidiRemoteType type, int dta, int value)
                         case RMIDI_NOTE_EDIT_MODE: a = getAction("note-input");  break;
                         case RMIDI_REALTIME_ADVANCE: a = getAction("realtime-advance");  break;
                         case RMIDI_SCORE_FOLLOW_NEXT: a = getAction("score-follow-next");  break;
+                        case RMIDI_SCORE_FOLLOW_RESET: a = getAction("score-follow-reset");  break;
 
                         }
                   if (a)
@@ -3796,6 +3815,12 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
       if (!isMidiInEnabled())
             return;
 
+      // the score follower must see every key release, also when a dialog is
+      // open or the note is a remote control, so that no key stays "held"
+      // (all channels: a MIDI bridge or the organ may use any channel, also 10)
+      if (!velo && _scoreFollower)
+            _scoreFollower->noteOff(pitch);
+
 // qDebug("midiNoteReceived %d %d %d", channel, pitch, velo);
 
       if (_midiRecordId != -1) {
@@ -3816,8 +3841,9 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
             active = 0;
             return;
             }
-      if (velo && channel != 0x09)
+      if (velo)
             scoreFollowNoteOn(pitch);
+
 
       if (velo) {
              /*
@@ -7163,7 +7189,25 @@ void MuseScore::scoreFollowUpdateView()
       }
 
 //---------------------------------------------------------
+//   scoreFollowReset
+//    back to the beginning of the piece (e.g. next verse)
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowReset()
+      {
+      if (!cv)
+            return;
+      cv->pageTop();
+      if (!scoreFollowReady() || !_scoreFollower->restart())
+            return;
+      _scoreFollowSelKey  = nullptr;
+      _scoreFollowSelTick = Fraction(-1, 1);
+      scoreFollowUpdateView();
+      }
+
+//---------------------------------------------------------
 //   scoreFollowNext
+
 //    "Next system" (key, pedal): scroll on by one system and,
 //    when following, continue from there.
 //---------------------------------------------------------
@@ -7488,6 +7532,8 @@ void MuseScore::cmd(QAction* a, const QString& cmd)
             setScoreFollow(a->isChecked());
       else if (cmd == "score-follow-next")
             scoreFollowNext();
+      else if (cmd == "score-follow-reset")
+            scoreFollowReset();
       else if (cmd == "mark-irregular") {
             cs->setMarkIrregularMeasures(a->isChecked());
             cs->update();

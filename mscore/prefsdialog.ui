@@ -2587,7 +2587,56 @@
             </property>
            </widget>
           </item>
-          <item row="5" column="12" colspan="3">
+          <item row="5" column="12">
+           <widget class="QLabel" name="label_scoreFollowReset">
+            <property name="text">
+             <string>Follow: reset</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="13">
+           <widget class="Ms::GreendotButton" name="scoreFollowResetActive">
+            <property name="focusPolicy">
+             <enum>Qt::StrongFocus</enum>
+            </property>
+            <property name="toolTip">
+             <string>Is active</string>
+            </property>
+            <property name="accessibleName">
+             <string>Follow live playing: reset is active</string>
+            </property>
+            <property name="text">
+             <string notr="true"/>
+            </property>
+            <property name="icon">
+             <iconset resource="musescore.qrc">
+              <normaloff>:/data/darkgreendot.svg</normaloff>
+              <normalon>:/data/greendot.svg</normalon>:/data/darkgreendot.svg</iconset>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="14">
+           <widget class="Ms::RecordButton" name="recordScoreFollowReset">
+            <property name="focusPolicy">
+             <enum>Qt::StrongFocus</enum>
+            </property>
+            <property name="toolTip">
+             <string>Record</string>
+            </property>
+            <property name="accessibleName">
+             <string>Follow live playing: reset record</string>
+            </property>
+            <property name="text">
+             <string notr="true"/>
+            </property>
+            <property name="icon">
+             <iconset resource="musescore.qrc">
+              <normaloff>:/data/recordOff.svg</normaloff>
+              <normalon>:/data/recordOn.svg</normalon>:/data/recordOff.svg</iconset>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="12" colspan="3">
            <widget class="QPushButton" name="midiRemoteControlClear">
             <property name="text">
              <string>Clear</string>
@@ -4514,6 +4563,9 @@ Adjusting latency can help synchronize your MIDI hardware with MuseScore's inter
   <tabstop>recordRealtimeAdvance</tabstop>
   <tabstop>scoreFollowNextActive</tabstop>
   <tabstop>recordScoreFollowNext</tabstop>
+  <tabstop>scoreFollowResetActive</tabstop>
+  <tabstop>recordScoreFollowReset</tabstop>
+
 
   <tabstop>advanceOnRelease</tabstop>
   <tabstop>midiRemoteControlClear</tabstop>

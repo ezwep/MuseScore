@@ -516,6 +516,8 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       void setPanPlayback(bool pan);
       void setScoreFollow(bool on);
       void scoreFollowNext();
+      void scoreFollowReset();
+
       void scoreFollowSelectionChanged();
       void scoreFollowUpdateView();
       void scoreFollowNoteOn(int pitch);
