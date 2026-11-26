@@ -66,7 +66,8 @@ class ScoreFollower {
       std::vector<Attack> _attacks;
       std::vector<Attack> _recent;      // all recent attacks (for "which chord was just struck")
 
-      int _misses          { 0 };       // attacks without progress
+      int _misses          { 0 };       // attacks without progress (recovery cadence)
+      int _stuck           { 0 };       // attacks without progress (for lost(), not reset by recovery attempts)
       std::vector<Attack> _history;     // last played attacks (for recovery)
       QHash<int, qint64> _held;         // pitches currently down -> time pressed
       qint64 _now          { 0 };       // time of the note being processed (ms)
@@ -82,6 +83,8 @@ class ScoreFollower {
 
       int needed(int idx) const;
       int chooseCandidate() const;
+      QSet<int> lastStrike() const;
+      bool nextVerse();
       bool fitsHistory(int last) const;
       int recover() const;
       int nearestRun(const Fraction& tick, int hint) const;
@@ -92,6 +95,8 @@ class ScoreFollower {
       static constexpr int EVIDENCE_MS    = 1500;// played pitches count as evidence this long
       static constexpr int STRIKE_MS      = 150; // a chord further away must be struck together within this time
       static constexpr int RATIO_ATTACKS  = 4;   // last attacks a candidate must mostly explain
+      static constexpr int LOST_MISSES    = 6;   // attacks without progress before we call ourselves lost
+      static constexpr int VERSE_TAIL     = 2;   // last events from which the first chord means "next verse"
 
       static constexpr int CHORD_MS       = 60;  // notes within this time after a move belong to the same chord
 
@@ -126,6 +131,8 @@ class ScoreFollower {
       bool advanceTo(const Fraction& tick);
 
       bool hasPosition() const { return _cur >= 0 && _cur < int(_events.size()); }
+      // several attacks in a row did not fit where we think the player is
+      bool lost() const        { return hasPosition() && _stuck >= LOST_MISSES; }
       Fraction tick() const    { return hasPosition() ? _events[_cur].tick : Fraction(-1, 1); }
 
       // for testing

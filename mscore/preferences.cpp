@@ -156,6 +156,7 @@ void Preferences::init(bool storeInMemoryOnly)
             {PREF_APP_PLAYBACK_COUNTIN,                            new BoolPreference(false)},
             {PREF_APP_PLAYBACK_PANPLAYBACK,                        new BoolPreference(true, false)},
             {PREF_APP_PLAYBACK_SCOREFOLLOW,                        new BoolPreference(false, false)},
+            {PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT,               new IntPreference(50, false)},
             {PREF_APP_PLAYBACK_PLAYREPEATS,                        new BoolPreference(true, false)},
             {PREF_APP_PLAYBACK_SPEEDINCREMENT,                     new IntPreference(5)},
             {PREF_APP_PLAYBACK_LOOPTOSELECTIONONPLAY,              new BoolPreference(true)},

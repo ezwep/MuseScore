@@ -1735,8 +1735,35 @@ MuseScore::MuseScore()
 
       QToolBar* followTools = addToolBar(tr("Follow Live Playing"));
       followTools->setObjectName("follow-tools");
-      for (const char* name : { "score-follow", "score-follow-next", "score-follow-reset" })
-            followTools->addWidget(new AccessibleToolButton(followTools, getAction(name)));
+
+      // when to scroll on: a small menu on the follow button (also in the View menu)
+      _scoreFollowMenu = new QMenu(tr("Follow Live Playing: Scroll"), this);
+      QActionGroup* scrollAt = new QActionGroup(_scoreFollowMenu);
+      const int scrollAtPref = preferences.getInt(PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT);
+      const std::pair<QString, int> scrollAtChoices[] = {
+            { tr("Scroll at the start of the last line"), 0 },
+            { tr("Scroll halfway through the last line"), 50 },
+            { tr("Scroll at the end of the last line"), 85 },
+            };
+      for (const auto& c : scrollAtChoices) {
+            QAction* sa = _scoreFollowMenu->addAction(c.first);
+            sa->setCheckable(true);
+            sa->setData(c.second);
+            sa->setChecked(c.second == scrollAtPref);
+            scrollAt->addAction(sa);
+            }
+      connect(scrollAt, &QActionGroup::triggered, this, [](QAction* sa) {
+            preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT, sa->data().toInt());
+            });
+
+      for (const char* name : { "score-follow", "score-follow-next", "score-follow-reset" }) {
+            AccessibleToolButton* b = new AccessibleToolButton(followTools, getAction(name));
+            if (!strcmp(name, "score-follow")) {
+                  b->setMenu(_scoreFollowMenu);
+                  b->setPopupMode(QToolButton::MenuButtonPopup);
+                  }
+            followTools->addWidget(b);
+            }
 
 
       //-------------------------------
@@ -1975,6 +2002,7 @@ MuseScore::MuseScore()
       menuView->addAction(getAction("score-follow"));
       menuView->addAction(getAction("score-follow-next"));
       menuView->addAction(getAction("score-follow-reset"));
+      menuView->addMenu(_scoreFollowMenu);
 
       a = getAction("toggle-piano-roll");
       a->setCheckable(true);
@@ -2612,6 +2640,19 @@ void MuseScore::showError()
 void MuseScore::retranslate()
       {
       setMenuTitles();
+      if (QToolBar* ft = findChild<QToolBar*>("follow-tools"))
+            ft->setWindowTitle(tr("Follow Live Playing"));
+      if (_scoreFollowMenu) {
+            _scoreFollowMenu->setTitle(tr("Follow Live Playing: Scroll"));
+            for (QAction* sa : _scoreFollowMenu->actions()) {
+                  switch (sa->data().toInt()) {
+                        case 0:  sa->setText(tr("Scroll at the start of the last line")); break;
+                        case 50: sa->setText(tr("Scroll halfway through the last line")); break;
+                        case 85: sa->setText(tr("Scroll at the end of the last line")); break;
+                        }
+                  }
+            }
+
       _positionLabel->setToolTip(tr("Measure:Beat:Tick"));
       pref->setText(tr("&Preferences…"));
 
@@ -3835,7 +3876,7 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
             return;
             }
       if (velo)
-            scoreFollowNoteOn(pitch);
+            scoreFollowNoteOn(pitch);   // also updates the "lost" colour
 
       // While following live playing (outside note input) MuseScore must not play
       // the incoming keys itself: that sound goes out via MIDI and reaches the
@@ -7156,7 +7197,9 @@ void MuseScore::scoreFollowNoteOn(int pitch)
       {
       if (!scoreFollowReady())
             return;
-      if (_scoreFollower->noteOn(pitch)) {
+      const bool moved = _scoreFollower->noteOn(pitch);
+      cv->setFollowLost(_scoreFollower->lost());
+      if (moved) {
             // the position moved away from the selection: clicking the
             // selected note again must re-anchor
             _scoreFollowSelKey  = nullptr;
@@ -7197,6 +7240,7 @@ void MuseScore::scoreFollowSelectionChanged()
 void MuseScore::scoreFollowUpdateView()
       {
       if (cv && _scoreFollower && _scoreFollower->hasPosition()) {
+            cv->setFollowLost(_scoreFollower->lost());
             cv->followPosition(_scoreFollower->tick());
             _scoreFollowView = cv;
             }
@@ -7236,7 +7280,9 @@ void MuseScore::scoreFollowNext()
       if (!follow || t < Fraction(0, 1))
             return;
       if (_scoreFollower->advanceTo(t) || _scoreFollower->setPosition(t)) {
+            cv->setFollowLost(false);
             cv->moveCursor(_scoreFollower->tick(), true);
+
             cv->setCursorOn(true);
             _scoreFollowView    = cv;
             _scoreFollowSelKey  = nullptr;

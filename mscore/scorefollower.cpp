@@ -50,7 +50,9 @@ void ScoreFollower::reset()
       {
       _cur     = -1;
       _misses  = 0;
+      _stuck   = 0;
       _matched.clear();
+
       _evidence.clear();
       _attacks.clear();
       _history.clear();
@@ -161,6 +163,7 @@ void ScoreFollower::setCurrent(int idx, const QSet<int>& consumed)
       _evidence.clear();
       _attacks.clear();
       _misses  = 0;
+      _stuck   = 0;
       }
 
 //---------------------------------------------------------
@@ -298,6 +301,61 @@ int ScoreFollower::needed(int idx) const
       }
 
 //---------------------------------------------------------
+//   lastStrike
+//    pitches attacked within the last STRIKE_MS: the chord
+//    that was just struck
+//---------------------------------------------------------
+
+QSet<int> ScoreFollower::lastStrike() const
+      {
+      QSet<int> strike;
+      for (const Attack& a : _recent)
+            if (_now - a.time <= STRIKE_MS)
+                  strike.insert(a.pitch);
+      return strike;
+      }
+
+//---------------------------------------------------------
+//   nextVerse
+//    At the end of the piece, striking the first chord means
+//    the next verse: go back to the beginning.
+//---------------------------------------------------------
+
+bool ScoreFollower::nextVerse()
+      {
+      const int n = int(_events.size());
+      if (_cur < n - VERSE_TAIL)
+            return false;
+      const QSet<int>& first = _events[0].pitches;
+      const int need = qMin(3, first.size());
+      if (need < 2)
+            return false;           // a single note is too weak to restart on
+      const QSet<int> strike = lastStrike();
+      int fit = 0, curFit = 0;
+      QSet<int> consumed;
+      for (int p : strike) {
+            if (first.contains(p)) {
+                  ++fit;
+                  consumed.insert(p);
+                  }
+            curFit += _events[_cur].pitches.contains(p);
+            }
+      // On the last chord, fully played, a new strike of the opening chord is
+      // the next verse even when it is the same chord (hymns end and start on
+      // the tonic). Otherwise it must fit the opening better than the current.
+      const bool lastDone = _cur == n - 1 && _matched.size() >= _events[_cur].pitches.size();
+      if (fit < need || (!lastDone && fit <= curFit))
+            return false;
+      // in a short piece the end is within reach of the start: only restart
+      // from the fully played last chord
+      if (!lastDone && n <= VERSE_TAIL + WINDOW + 1)
+            return false;
+      setCurrent(0, consumed);
+      _history.clear();
+      return true;
+      }
+
+//---------------------------------------------------------
 //   chooseCandidate
 //    nearest event (next one first, then alternately back and
 //    ahead) with enough evidence; -1 if none
@@ -342,10 +400,7 @@ int ScoreFollower::chooseCandidate() const
                   // pitches and fit it better than the current chord; re-striking
                   // the current chord is not a jump to a similar chord elsewhere
                   if (j != _cur + 1 && need >= 2) {
-                        QSet<int> strike;
-                        for (const Attack& a : _recent)
-                              if (_now - a.time <= STRIKE_MS)
-                                    strike.insert(a.pitch);
+                        const QSet<int> strike = lastStrike();
                         int candFit = 0, curFit = 0;
                         for (int p : strike) {
                               candFit += _events[j].pitches.contains(p);
@@ -418,6 +473,7 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
                   _lastMove = _now;     // first attack of a chord we were positioned at: arm the chord window
             _matched.insert(sp);
             _misses = 0;                // progress: a note of the current chord
+            _stuck  = 0;
             }
       else {
             _attacks.push_back(Attack { pitch, _now });
@@ -436,8 +492,11 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
                   }
             }
 
-      // 4. move when an event has enough evidence
+      // 4. move when an event has enough evidence; at the end of the piece a
+      //    strike of the opening chord means the next verse
       const int j = chooseCandidate();
+      if (j < 0 && !explained && nextVerse())
+            return true;
       if (j >= 0) {
             QSet<int> consumed;
             const auto& ev = _evidence[j];
@@ -453,6 +512,7 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
       // 5. no progress (also when the pitch occurs nearby but nothing moved):
       //    after several such attacks, search the whole score
       Q_UNUSED(anywhere);
+      ++_stuck;
       if (++_misses >= MAX_MISSES) {
             _misses = 0;
             int r = recover();

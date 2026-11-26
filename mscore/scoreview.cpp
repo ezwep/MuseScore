@@ -609,9 +609,14 @@ void ScoreView::moveCursor(const Fraction& tick, bool forceVisible)
       if (s == 0)
             return;
 
-      _cursorColor = QColor(MScore::cursorColor);
-      if(_cursorColor.alpha() > MAX_CURSOR_ALPHA)
-            _cursorColor.setAlpha(50);
+      if (forceVisible)
+            // score follower: green while following, orange when it lost track
+            _cursorColor = _followLost ? QColor(255, 140, 0, 70) : QColor(0, 180, 90, 60);
+      else {
+            _cursorColor = QColor(MScore::cursorColor);
+            if(_cursorColor.alpha() > MAX_CURSOR_ALPHA)
+                  _cursorColor.setAlpha(50);
+            }
       _cursor->setColor(_cursorColor);
       _cursor->setTick(tick);
 
@@ -3846,8 +3851,25 @@ void ScoreView::scrollSystemToTop(const System* sys)
       }
 
 //---------------------------------------------------------
+//   setFollowLost
+//    score follower lost track: show it in the cursor colour
+//---------------------------------------------------------
+
+void ScoreView::setFollowLost(bool lost)
+      {
+      if (lost == _followLost)
+            return;
+      _followLost = lost;
+      if (_cursor && _cursor->visible()) {
+            moveCursor(_cursor->tick(), true);
+            update(_matrix.mapRect(_cursor->rect()).toRect().adjusted(-1,-1,1,1));
+            }
+      }
+
+//---------------------------------------------------------
 //   stopFollowScroll
 //---------------------------------------------------------
+
 
 void ScoreView::stopFollowScroll()
       {
@@ -3902,14 +3924,16 @@ void ScoreView::followPosition(const Fraction& tick)
             scrollSystemToTop(sys);
             return;
             }
-      // On the last fully visible system: scroll once the player is
-      // halfway through it, so the line can still be read at the bottom.
+      // On the last fully visible system: scroll once the player is at the
+      // chosen point of it (start, halfway, end), so the line can still be read
+      // at the bottom.
       System* next = nextMusicSystem(score(), sys);
       if (next && !systemFullyVisible(next)) {
             const QRectF sr = sys->canvasBoundingRect();
             Segment* s = m->findSegment(SegmentType::ChordRest, tick);
             const qreal cx = s ? s->canvasPos().x() : m->canvasPos().x();
-            if (cx >= sr.left() + sr.width() * 0.5)
+            const qreal at = qBound(0, preferences.getInt(PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT), 100) / 100.0;
+            if (cx >= sr.left() + sr.width() * at)
                   scrollSystemToTop(sys);
             }
       }

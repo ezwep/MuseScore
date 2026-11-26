@@ -88,6 +88,63 @@ int main() {
       chord(f, {60,64,67}); chord(f, {60,64,67}); chord(f, {62});
       CHECK(f.currentIndex()==0, "re-struck chord + one wrong note does not jump to a similar chord");
 
+      // verses: the piece ends and starts on the same chord; after the last chord
+      // a new strike of the opening chord goes back to the beginning
+      {
+            std::vector<ScoreFollower::Event> v;
+            const std::initializer_list<int> tonic = {67,64,60,48};
+            v.push_back(ev(0, tonic));
+            for (int i = 1; i < 11; ++i) v.push_back(ev(i * 480, {60 + i, 55 + i, 48 + i}));
+            v.push_back(ev(11 * 480, tonic));
+            reset(f, v);
+            chord(f, tonic);
+            for (int i = 1; i < 11; ++i) chord(f, {60 + i, 55 + i, 48 + i});
+            CHECK(f.currentIndex()==10, "verse: before the last chord");
+            chord(f, tonic); CHECK(f.currentIndex()==11, "verse: last chord");
+            now += 3000;     // pause between the verses
+            chord(f, tonic); CHECK(f.currentIndex()==0, "verse: opening chord again = next verse");
+            chord(f, {61,56,49}); CHECK(f.currentIndex()==1, "verse: and on");
+            for (int i = 2; i < 6; ++i) chord(f, {60 + i, 55 + i, 48 + i});
+            chord(f, tonic); CHECK(f.currentIndex()==5, "verse: opening chord in the middle is not a restart");
+      }
+
+      // review 7: penultimate dominant, then the closing tonic (= opening chord),
+      // spread over more than 60 ms: must go to the last chord, not restart
+      {
+            std::vector<ScoreFollower::Event> v;
+            const std::initializer_list<int> tonic = {67,64,60,48};
+            v.push_back(ev(0, tonic));
+            for (int i = 1; i < 10; ++i) v.push_back(ev(i * 480, {60 + i, 55 + i, 48 + i}));
+            v.push_back(ev(10 * 480, {67,62,59,55}));     // dominant
+            v.push_back(ev(11 * 480, tonic));
+            reset(f, v);
+            chord(f, tonic);
+            for (int i = 1; i < 10; ++i) chord(f, {60 + i, 55 + i, 48 + i});
+            chord(f, {67,62,59,55}); CHECK(f.currentIndex()==10, "end: dominant");
+            chordSpaced(f, tonic, 90); CHECK(f.currentIndex()==11, "end: rolled closing tonic goes to the last chord, no restart");
+      }
+      // short piece: verse restart from the fully played last chord
+      reset(f, {ev(0,{60,64,67}), ev(480,{62,65,69}), ev(960,{60,64,67})});
+      chord(f, {60,64,67}); chord(f, {62,65,69}); chord(f, {60,64,67});
+      CHECK(f.currentIndex()==2, "short piece: last chord");
+      now += 3000; chord(f, {60,64,67}); CHECK(f.currentIndex()==0, "short piece: next verse");
+
+      // lost stays lost during continuous wrong notes (no flicker after a failed recovery)
+      reset(f, hymn);
+      chord(f, {67,64,60,48});
+      for (int p : {30, 31, 33, 35, 37, 39, 30, 31, 33, 35, 37, 39}) chord(f, {p});
+      CHECK(f.lost(), "lost: still lost after twelve wrong notes (failed recoveries)");
+
+      // lost: several notes that fit nowhere near -> lost(), right chord -> not lost
+      reset(f, hymn);
+      chord(f, {67,64,60,48});
+      CHECK(!f.lost(), "lost: not lost while following");
+      for (int p : {30, 31, 33, 35}) chord(f, {p});
+      CHECK(!f.lost(), "lost: four wrong notes are not yet 'lost'");
+      for (int p : {37, 39}) chord(f, {p});
+      CHECK(f.lost(), "lost: after six notes that fit nowhere");
+      chord(f, {67,62,59,55}); CHECK(f.currentIndex()==1 && !f.lost(), "lost: right chord -> found again");
+
       // Psalm 25 opening (shared tones between chords) with MIDI echo
       std::vector<ScoreFollower::Event> ps25 = {
             ev(0,{65,60,57,53}), ev(960,{67,64,57,45}), ev(1440,{65,61,53,49}), ev(1920,{60,64,57,48}) };

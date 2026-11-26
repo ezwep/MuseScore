@@ -193,6 +193,7 @@ class ScoreView : public QWidget, public MuseScoreView {
       QVariantAnimation* _followAnim { nullptr };   // smooth scrolling for the score follower
       const void* _followTargetSystem { nullptr };  // system _followAnim brings to the top (compared only)
       bool _followAnimating { false };              // offset change made by _followAnim itself
+      bool _followLost { false };                   // score follower lost track (orange cursor)
 
 
       QColor _cursorColor;
@@ -408,6 +409,8 @@ class ScoreView : public QWidget, public MuseScoreView {
       Fraction followNextSystem(const Fraction& fromTick);
       bool systemFullyVisible(const System* sys) const;
       void stopFollowScroll();
+      void setFollowLost(bool lost);
+
 
       void scrollSystemToTop(const System* sys);
 
