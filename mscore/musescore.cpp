@@ -1735,15 +1735,8 @@ MuseScore::MuseScore()
 
       QToolBar* followTools = addToolBar(tr("Follow Live Playing"));
       followTools->setObjectName("follow-tools");
-      followTools->setToolButtonStyle(Qt::ToolButtonTextOnly);
-      // Dutch labels on purpose (personal build); the actions' menu texts stay translatable
-      getAction("score-follow")->setIconText(QStringLiteral("Meelezen"));
-      getAction("score-follow-next")->setIconText(QStringLiteral("Volgende regel"));
-      getAction("score-follow-reset")->setIconText(QStringLiteral("Opnieuw"));
-
-      followTools->addAction(getAction("score-follow"));
-      followTools->addAction(getAction("score-follow-next"));
-      followTools->addAction(getAction("score-follow-reset"));
+      for (const char* name : { "score-follow", "score-follow-next", "score-follow-reset" })
+            followTools->addWidget(new AccessibleToolButton(followTools, getAction(name)));
 
 
       //-------------------------------
@@ -7148,8 +7141,11 @@ void MuseScore::scoreFollowHideCursor()
       {
       ScoreView* v = _scoreFollowView;
       _scoreFollowView = nullptr;
+      if (v)
+            v->stopFollowScroll();
       if (v && !v->noteEntryMode() && (!seq || !seq->isPlaying()))
             v->setCursorOn(false);
+
       }
 
 //---------------------------------------------------------

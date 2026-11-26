@@ -194,7 +194,11 @@ static const char* iconNames[] = {
       "rhythmic-slash-notation.svg",
       "keyboard.svg",
       "keyboard-vertical.svg",
+      "score-follow.svg",
+      "score-follow-next.svg",
+      "score-follow-reset.svg",
       };
+
 
 //---------------------------------------------------------
 //   genIcons

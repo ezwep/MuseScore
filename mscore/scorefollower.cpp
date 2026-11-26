@@ -12,6 +12,7 @@
 
 #include "scorefollower.h"
 
+#include <algorithm>
 #include <climits>
 
 
@@ -51,6 +52,7 @@ void ScoreFollower::reset()
       _misses  = 0;
       _matched.clear();
       _evidence.clear();
+      _attacks.clear();
       _history.clear();
       }
 
@@ -157,6 +159,7 @@ void ScoreFollower::setCurrent(int idx, const QSet<int>& consumed)
       _cur     = idx;
       _matched = consumed;
       _evidence.clear();
+      _attacks.clear();
       _misses  = 0;
       }
 
@@ -184,30 +187,40 @@ int ScoreFollower::matchPitch(int idx, int pitch, const QSet<int>& consumed, boo
 
 //---------------------------------------------------------
 //   fitsHistory
-//    Can the played history end at event last? Each earlier
-//    pitch must be in the same chord as the next one, or up
-//    to two chords before it. All feasible paths are kept.
+//    Can the played history end at event last? Attacks struck
+//    together (within STRIKE_MS) must belong to the same event,
+//    a later strike to a later event (at most two further).
+//    The history must contain at least one such transition: a
+//    single chord occurs everywhere and proves nothing.
 //---------------------------------------------------------
 
 bool ScoreFollower::fitsHistory(int last) const
       {
       const int k = int(_history.size());
-      if (!_events[last].pitches.contains(_history[k - 1]))
+      if (!_events[last].pitches.contains(_history[k - 1].pitch))
             return false;
+      bool transition = false;
       QSet<int> reach { last };
       for (int t = k - 2; t >= 0; --t) {
+            const bool sameStrike = _history[t + 1].time - _history[t].time <= STRIKE_MS;
+            transition = transition || !sameStrike;
             QSet<int> prev;
             for (int r : reach) {
-                  for (int j = r; j >= qMax(0, r - 2); --j) {
-                        if (_events[j].pitches.contains(_history[t]))
-                              prev.insert(j);
+                  if (sameStrike) {
+                        if (_events[r].pitches.contains(_history[t].pitch))
+                              prev.insert(r);
+                        }
+                  else {
+                        for (int j = r - 1; j >= qMax(0, r - 2); --j)
+                              if (_events[j].pitches.contains(_history[t].pitch))
+                                    prev.insert(j);
                         }
                   }
             if (prev.isEmpty())
                   return false;
             reach = prev;
             }
-      return true;
+      return transition;
       }
 
 //---------------------------------------------------------
@@ -306,6 +319,41 @@ int ScoreFollower::chooseCandidate() const
                   // (a late or re-voiced note of it), else repeated chords run ahead
                   if (!unexplained)
                         continue;
+                  // and the candidate must explain most of the attacks that did not
+                  // fit the current chord (half for the next chord, 60% otherwise)
+                  // (for a far single note, the note before it explains attacks too)
+                  const bool seq = need == 1 && j != _cur + 1 && j > 0;
+                  // only the last RATIO_ATTACKS such attacks count: older ones may be
+                  // right notes that were not accepted yet, they must not hold us back
+                  int total = 0;
+                  int hits = 0;
+                  for (auto ai = _attacks.crbegin(); ai != _attacks.crend() && total < RATIO_ATTACKS; ++ai) {
+                        const Attack& a = *ai;
+                        if (_now - a.time >= EVIDENCE_MS)
+                              break;
+                        ++total;
+                        if (_events[j].pitches.contains(a.pitch) || (seq && _events[j - 1].pitches.contains(a.pitch)))
+                              ++hits;
+                        }
+                  if (j == _cur + 1 ? hits * 2 < total : hits * 10 < total * 6)
+                        continue;
+                  // further away or back: the chord that was just struck (the
+                  // attacks of the last STRIKE_MS) must contain enough of its
+                  // pitches and fit it better than the current chord; re-striking
+                  // the current chord is not a jump to a similar chord elsewhere
+                  if (j != _cur + 1 && need >= 2) {
+                        QSet<int> strike;
+                        for (const Attack& a : _recent)
+                              if (_now - a.time <= STRIKE_MS)
+                                    strike.insert(a.pitch);
+                        int candFit = 0, curFit = 0;
+                        for (int p : strike) {
+                              candFit += _events[j].pitches.contains(p);
+                              curFit  += _events[_cur].pitches.contains(p);
+                              }
+                        if (candFit < need || candFit <= curFit)
+                              continue;
+                        }
                   // a far single note is too weak on its own: it must follow an
                   // earlier, separate attack on the event before it
                   if (need == 1 && j != _cur + 1) {
@@ -332,11 +380,14 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
             return false;
       _held.insert(pitch, ms);
       _now = ms;
+      _recent.push_back(Attack { pitch, ms });
+      if (_recent.size() > 32)
+            _recent.erase(_recent.begin());
 
       if (!ensureEvents())
             return false;
 
-      _history.push_back(pitch);
+      _history.push_back(Attack { pitch, ms });
       if (int(_history.size()) > HISTORY)
             _history.erase(_history.begin());
 
@@ -366,7 +417,12 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
             if (_matched.isEmpty())
                   _lastMove = _now;     // first attack of a chord we were positioned at: arm the chord window
             _matched.insert(sp);
-            _misses = 0;
+            _misses = 0;                // progress: a note of the current chord
+            }
+      else {
+            _attacks.push_back(Attack { pitch, _now });
+            if (_attacks.size() > 32)
+                  _attacks.erase(_attacks.begin());
             }
 
       // 3. every attack is evidence for the events around the current one
@@ -391,12 +447,12 @@ bool ScoreFollower::noteOn(int pitch, qint64 ms)
             setCurrent(j, consumed);
             return true;
             }
-      if (explained || anywhere) {
-            _misses = 0;
+      if (explained)
             return false;
-            }
 
-      // 5. miss: after several, search the whole score
+      // 5. no progress (also when the pitch occurs nearby but nothing moved):
+      //    after several such attacks, search the whole score
+      Q_UNUSED(anywhere);
       if (++_misses >= MAX_MISSES) {
             _misses = 0;
             int r = recover();

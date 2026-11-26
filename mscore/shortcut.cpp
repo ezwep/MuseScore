@@ -2528,7 +2528,7 @@ Shortcut Shortcut::_sc[] = {
          QT_TRANSLATE_NOOP("action","Follow Live Playing"),
          QT_TRANSLATE_NOOP("action","Toggle 'Follow Live Playing'"),
          QT_TRANSLATE_NOOP("action","Follow MIDI input while playing from the score and scroll automatically"),
-         Icons::Invalid_ICON,
+         Icons::scoreFollow_ICON,
          Qt::WindowShortcut,
          ShortcutFlags::A_SCORE | ShortcutFlags::A_CHECKABLE
          },
@@ -2538,6 +2538,8 @@ Shortcut Shortcut::_sc[] = {
          "score-follow-next",
          QT_TRANSLATE_NOOP("action","Follow Live Playing: Next System"),
          QT_TRANSLATE_NOOP("action","Follow live playing: scroll to next system"),
+         QT_TRANSLATE_NOOP("action","Follow live playing: scroll to next system"),
+         Icons::scoreFollowNext_ICON
          },
       {
          MsWidget::SCORE_TAB,
@@ -2545,7 +2547,10 @@ Shortcut Shortcut::_sc[] = {
          "score-follow-reset",
          QT_TRANSLATE_NOOP("action","Follow Live Playing: Reset"),
          QT_TRANSLATE_NOOP("action","Follow live playing: back to the beginning"),
+         QT_TRANSLATE_NOOP("action","Follow live playing: back to the beginning"),
+         Icons::scoreFollowReset_ICON
          },
+
 
       {
          MsWidget::MAIN_WINDOW,

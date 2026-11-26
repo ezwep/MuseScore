@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>score-follow-reset</title>
+    <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <!-- staff -->
+        <g fill="#3B3F45">
+            <rect x="2" y="19" width="20" height="1"/>
+            <rect x="2" y="21" width="20" height="1"/>
+            <!-- start marker -->
+            <rect x="2" y="16" width="2" height="7"/>
+        </g>
+        <!-- circular arrow back to the start -->
+        <path d="M18.5,10 A6.5,6.5 0 1 1 13.5,3.7" stroke="#3B3F45" stroke-width="2" fill="none"/>
+        <polygon fill="#3B3F45" points="11 0.5 17 3.5 11.5 7.5"/>
+    </g>
+</svg>

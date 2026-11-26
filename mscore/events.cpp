@@ -144,6 +144,7 @@ bool ScoreView::gestureEvent(QGestureEvent *event)
 void ScoreView::wheelEvent(QWheelEvent* event)
        {
 #define PIXELSSTEPSFACTOR 5
+      stopFollowScroll();     // the user takes over
 
       QPoint pixelsScrolled = event->pixelDelta();
       QPoint stepsScrolled  = event->angleDelta();
@@ -487,6 +488,8 @@ void ScoreView::mousePressEventNormal(QMouseEvent* ev)
 
 void ScoreView::mousePressEvent(QMouseEvent* ev)
       {
+      stopFollowScroll();
+
 
       if (tripleClickPending) {
             if (textEditMode()) {

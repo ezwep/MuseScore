@@ -80,8 +80,10 @@ enum class Icons : short { Invalid_ICON = -1,
       rhythmicSlash_ICON,
       onscreenKeyboard_ICON,
       pianorollEditor_ICON,
+      scoreFollow_ICON, scoreFollowNext_ICON, scoreFollowReset_ICON,
 
       voice1_ICON, voice2_ICON, voice3_ICON, voice4_ICON,
+
       ICONS
       };
 

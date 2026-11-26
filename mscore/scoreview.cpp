@@ -24,6 +24,9 @@
 #include "scoreaccessibility.h"
 #include "scoretab.h"
 #include "scoreview.h"
+
+#include <QVariantAnimation>
+
 #include "seq.h"
 #include "splitstaff.h"
 #include "textcursor.h"
@@ -1731,6 +1734,7 @@ void ScoreView::setPhysicalZoomLevel(const qreal physicalLevel)
             return;
 
       const double deltaPhysicalLevel = physicalLevel / currentPhysicalLevel;
+      stopFollowScroll();
 
       _matrix.setMatrix(physicalLevel, _matrix.m12(), _matrix.m13(), _matrix.m21(),
             physicalLevel, _matrix.m23(), _matrix.dx() * deltaPhysicalLevel, _matrix.dy() * deltaPhysicalLevel, _matrix.m33());
@@ -3465,6 +3469,7 @@ void ScoreView::dragScoreView(QMouseEvent* ev)
             return;
 
       constraintCanvas(&dx, &dy);
+      stopFollowScroll();
 
       TourHandler::startTour("navigate-tour");
 
@@ -3588,6 +3593,8 @@ qreal ScoreView::physicalZoomLevel() const
 
 void ScoreView::setOffset(qreal x, qreal y)
       {
+      if (!_followAnimating)
+            stopFollowScroll();     // any other scrolling (keys, reset, zoom, playback) takes over
       _matrix.setMatrix(_matrix.m11(), _matrix.m12(), _matrix.m13(), _matrix.m21(),
          _matrix.m22(), _matrix.m23(), x, y, _matrix.m33());
       imatrix = _matrix.inverted();
@@ -3805,9 +3812,55 @@ void ScoreView::scrollSystemToTop(const System* sys)
             }
       // a little room above the system for tempo marks, volta's etc.
       const qreal y = -(r.top() - 2.0 * score()->spatium()) * zoom;
-      setConstrainedOffset(x, y);
-      update();
+
+      // glide there instead of jumping, so the eye can follow the music
+      if (_followAnim && _followTargetSystem == sys)
+            return;           // already on its way there (keep the original destination)
+      stopFollowScroll();
+      const QPointF to(x, y);
+      const QPointF from(xoffset(), yoffset());
+      if ((to - from).manhattanLength() < 2.0)
+            return;
+      _followTargetSystem = sys;
+      _followAnim = new QVariantAnimation(this);
+      _followAnim->setDuration(700);
+      _followAnim->setEasingCurve(QEasingCurve::InOutCubic);
+      _followAnim->setStartValue(0.0);
+      _followAnim->setEndValue(1.0);
+      connect(_followAnim, &QVariantAnimation::valueChanged, this, [this, from, to](const QVariant& v) {
+            const qreal t = v.toReal();
+            _followAnimating = true;
+            setConstrainedOffset(from.x() + (to.x() - from.x()) * t, from.y() + (to.y() - from.y()) * t);
+            _followAnimating = false;
+            update();
+            });
+      QVariantAnimation* anim = _followAnim;
+      connect(_followAnim, &QVariantAnimation::finished, this, [this, anim]() {
+            if (_followAnim == anim) {
+                  _followAnim = nullptr;
+                  _followTargetSystem = nullptr;
+                  }
+            anim->deleteLater();
+            });
+      _followAnim->start();
       }
+
+//---------------------------------------------------------
+//   stopFollowScroll
+//---------------------------------------------------------
+
+void ScoreView::stopFollowScroll()
+      {
+      if (!_followAnim)
+            return;
+      QVariantAnimation* anim = _followAnim;
+      _followAnim = nullptr;
+      _followTargetSystem = nullptr;
+      anim->stop();
+      anim->deleteLater();
+      }
+
+
 
 //---------------------------------------------------------
 //   followPosition

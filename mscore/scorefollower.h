@@ -41,6 +41,11 @@ class ScoreFollower {
             };
 
    private:
+      struct Attack {
+            int pitch;
+            qint64 time;
+            };
+
       Score* _score        { nullptr };
       int _undoState       { -1 };      // undo stack state the event list was built for
       bool _repeats        { true };    // repeat expansion the event list was built for
@@ -55,8 +60,14 @@ class ScoreFollower {
             bool explained;           // the attack also fitted the current chord
             };
       QHash<int, QHash<int, Evidence>> _evidence;
-      int _misses          { 0 };       // consecutive unmatched notes
-      std::vector<int> _history;        // last played pitches (for recovery)
+      // attacks since the last move that did not fit the current chord: a
+      // candidate must explain most of them, so a burst of wrong notes that
+      // happens to hit a chord ahead does not move the position
+      std::vector<Attack> _attacks;
+      std::vector<Attack> _recent;      // all recent attacks (for "which chord was just struck")
+
+      int _misses          { 0 };       // attacks without progress
+      std::vector<Attack> _history;     // last played attacks (for recovery)
       QHash<int, qint64> _held;         // pitches currently down -> time pressed
       qint64 _now          { 0 };       // time of the note being processed (ms)
       qint64 _lastMove     { -1000000 };// time of the last forward move (ms)
@@ -76,15 +87,17 @@ class ScoreFollower {
       int nearestRun(const Fraction& tick, int hint) const;
 
    public:
-      static constexpr int WINDOW         = 8;   // look-ahead in events
+      static constexpr int WINDOW         = 3;   // look-ahead in events (bigger skips: recovery, click, next system)
       static constexpr int BACK           = 4;   // look-back in events (recover from a false advance)
       static constexpr int EVIDENCE_MS    = 1500;// played pitches count as evidence this long
+      static constexpr int STRIKE_MS      = 150; // a chord further away must be struck together within this time
+      static constexpr int RATIO_ATTACKS  = 4;   // last attacks a candidate must mostly explain
 
       static constexpr int CHORD_MS       = 60;  // notes within this time after a move belong to the same chord
 
       static constexpr int HELD_EXPIRE_MS = 20000; // forget a held key after this time (lost note-off)
-      static constexpr int MAX_MISSES     = 6;   // misses before a global recovery search
-      static constexpr int HISTORY        = 4;   // pitches used for recovery
+      static constexpr int MAX_MISSES     = 8;   // misses before a global recovery search
+      static constexpr int HISTORY        = 6;   // pitches used for recovery
       static constexpr int RECOVER_SPAN   = 2;   // max spread of recovery candidates
 
       void setScore(Score* s);

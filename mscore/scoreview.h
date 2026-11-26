@@ -25,6 +25,9 @@
 #include "libmscore/pos.h"
 #include "libmscore/property.h"
 
+class QVariantAnimation;
+
+
 namespace Ms {
 
 class ChordRest;
@@ -187,6 +190,11 @@ class ScoreView : public QWidget, public MuseScoreView {
 
       //--input state:
       PositionCursor* _cursor;
+      QVariantAnimation* _followAnim { nullptr };   // smooth scrolling for the score follower
+      const void* _followTargetSystem { nullptr };  // system _followAnim brings to the top (compared only)
+      bool _followAnimating { false };              // offset change made by _followAnim itself
+
+
       QColor _cursorColor;
       const int MAX_CURSOR_ALPHA = 220;
 
@@ -399,6 +407,8 @@ class ScoreView : public QWidget, public MuseScoreView {
       void followPosition(const Fraction& tick);
       Fraction followNextSystem(const Fraction& fromTick);
       bool systemFullyVisible(const System* sys) const;
+      void stopFollowScroll();
+
       void scrollSystemToTop(const System* sys);
 
       void setBackground(QPixmap*);
