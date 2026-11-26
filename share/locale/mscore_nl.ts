@@ -15065,6 +15065,26 @@ Sessie herstellen?</translation>
 This plugin requires an open score to run.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Follow Live Playing</source>
+        <translation>Meelezen</translation>
+    </message>
+    <message>
+        <source>Follow Live Playing: Scroll</source>
+        <translation>Meelezen: doorschuiven</translation>
+    </message>
+    <message>
+        <source>Scroll at the start of the last line</source>
+        <translation>Doorschuiven aan het begin van de laatste regel</translation>
+    </message>
+    <message>
+        <source>Scroll halfway through the last line</source>
+        <translation>Doorschuiven halverwege de laatste regel</translation>
+    </message>
+    <message>
+        <source>Scroll at the end of the last line</source>
+        <translation>Doorschuiven aan het eind van de laatste regel</translation>
+    </message>
 </context>
 <context>
     <name>Ms::MuseScoreApplication</name>
@@ -21272,6 +21292,30 @@ Het aanpassen van de latency kan helpen om MIDI-hardware te synchroniseren met M
         <location filename="../../mscore/prefsdialog.ui" line="4246"/>
         <source>Check for new version of MuseScore</source>
         <translation>Controleer op nieuwe versie van MuseScore</translation>
+    </message>
+    <message>
+        <source>Follow: next system</source>
+        <translation>Meelezen: volgende regel</translation>
+    </message>
+    <message>
+        <source>Follow: reset</source>
+        <translation>Meelezen: opnieuw</translation>
+    </message>
+    <message>
+        <source>Follow live playing: next system is active</source>
+        <translation>Meelezen: volgende regel is actief</translation>
+    </message>
+    <message>
+        <source>Follow live playing: next system record</source>
+        <translation>Meelezen: volgende regel opnemen</translation>
+    </message>
+    <message>
+        <source>Follow live playing: reset is active</source>
+        <translation>Meelezen: opnieuw is actief</translation>
+    </message>
+    <message>
+        <source>Follow live playing: reset record</source>
+        <translation>Meelezen: opnieuw opnemen</translation>
     </message>
 </context>
 <context>
@@ -30259,6 +30303,34 @@ mislukt</translation>
         <location filename="../../mscore/shortcut.cpp" line="4056"/>
         <source>Start center</source>
         <translation>Starthulpscherm</translation>
+    </message>
+    <message>
+        <source>Follow Live Playing</source>
+        <translation>Meelezen</translation>
+    </message>
+    <message>
+        <source>Toggle &apos;Follow Live Playing&apos;</source>
+        <translation>&apos;Meelezen&apos; aan/uit</translation>
+    </message>
+    <message>
+        <source>Follow MIDI input while playing from the score and scroll automatically</source>
+        <translation>Volg wat je via MIDI speelt en scrol automatisch mee</translation>
+    </message>
+    <message>
+        <source>Follow Live Playing: Next System</source>
+        <translation>Meelezen: volgende regel</translation>
+    </message>
+    <message>
+        <source>Follow live playing: scroll to next system</source>
+        <translation>Meelezen: naar de volgende regel</translation>
+    </message>
+    <message>
+        <source>Follow Live Playing: Reset</source>
+        <translation>Meelezen: opnieuw</translation>
+    </message>
+    <message>
+        <source>Follow live playing: back to the beginning</source>
+        <translation>Meelezen: terug naar het begin</translation>
     </message>
 </context>
 <context>
