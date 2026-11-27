@@ -1,5 +1,10 @@
 #include "scorefollower.h"
 #include <cstdio>
+#include <memory>
+#include <algorithm>
+#include <QFile>
+#include <QTextStream>
+#include <QStringList>
 using namespace Ms;
 static int fails = 0;
 #define CHECK(c, msg) do { if (!(c)) { ++fails; printf("FAIL: %s (line %d, idx %d)\n", msg, __LINE__, f.currentIndex()); } else printf("ok:   %s\n", msg); } while (0)
@@ -39,7 +44,126 @@ static void reset(ScoreFollower& f, const std::vector<ScoreFollower::Event>& e)
       f.setEvents(e);
       }
 
-int main() {
+// load a chord list in replay-log format (EVENTS n / E idx tick p1,p2,...)
+static std::vector<ScoreFollower::Event> loadEvents(const QString& path)
+      {
+      std::vector<ScoreFollower::Event> ev;
+      QFile file(path);
+      if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return ev;
+      QTextStream in(&file);
+      while (!in.atEnd()) {
+            const QStringList w = in.readLine().split(' ', Qt::SkipEmptyParts);
+            if (w.size() >= 4 && w[0] == "E") {
+                  ScoreFollower::Event e;
+                  e.tick = Fraction::fromTicks(w[2].toInt());
+                  for (const QString& p : w[3].split(',')) e.pitches.insert(p.toInt());
+                  ev.push_back(e);
+                  }
+            }
+      return ev;
+      }
+
+static unsigned orderSeed = 1;
+static void strike(ScoreFollower& f, const QSet<int>& ps)
+      {
+      now += 500;
+      for (int p : down) f.noteOff(p);
+      down.clear();
+      // like a real player: the notes of a chord arrive in varying order
+      std::vector<int> v(ps.begin(), ps.end());
+      std::sort(v.begin(), v.end());
+      for (size_t i = v.size(); i > 1; --i) {
+            orderSeed = orderSeed * 1103515245u + 12345u;
+            std::swap(v[i - 1], v[(orderSeed >> 16) % i]);
+            }
+      qint64 t = now;
+      for (int p : v) { f.noteOn(p, t); down.push_back(p); t += 3 + int((orderSeed >> 8) % 20); }
+      }
+
+// Replay a MuseScoreMeelezen.log: feed the logged notes with their logged times
+// and show, per note, what the app decided then and what the current code decides.
+// The replay runs on continuously (no resynchronising): after the first difference
+// the two may drift apart, which is shown as such. Each START is a fresh session.
+static int replay(const char* path)
+      {
+      QFile file(QString::fromLocal8Bit(path));
+      if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) { printf("cannot open %s\n", path); return 2; }
+      std::unique_ptr<ScoreFollower> f(new ScoreFollower);
+      std::vector<ScoreFollower::Event> events;
+      int expect = -1, diffs = 0, ons = 0, lineNo = 0, firstDiff = -1;
+      QTextStream in(&file);
+      auto bad = [&](const QString& l) { printf("  (line %d skipped: %s)\n", lineNo, qPrintable(l)); };
+      while (!in.atEnd()) {
+            const QString line = in.readLine();
+            ++lineNo;
+            const QStringList w = line.split(' ', Qt::SkipEmptyParts);
+            if (w.isEmpty())
+                  continue;
+            bool ok1 = true, ok2 = true;
+            if (w[0] == "START") {
+                  f.reset(new ScoreFollower);           // new session: no state carried over
+                  events.clear();
+                  expect = -1;
+                  printf("%s\n", qPrintable(line));
+                  }
+            else if (w[0] == "EVENTS" && w.size() >= 2) {
+                  events.clear();
+                  expect = w[1].toInt(&ok1);
+                  if (!ok1) { bad(line); expect = -1; continue; }
+                  if (expect == 0) f->setEvents(events);
+                  }
+            else if (w[0] == "E" && w.size() >= 3) {
+                  ScoreFollower::Event e;
+                  e.tick = Fraction::fromTicks(w[2].toInt(&ok1));
+                  if (w.size() > 3)
+                        for (const QString& p : w[3].split(',')) { bool ok; int v = p.toInt(&ok); if (ok) e.pitches.insert(v); }
+                  if (!ok1) { bad(line); continue; }
+                  events.push_back(e);
+                  if (int(events.size()) == expect) { f->setEvents(events); printf("  (%d chords loaded)\n", expect); }
+                  }
+            else if (w[0] == "OFF" && w.size() >= 3) {
+                  const qint64 t = w[1].toLongLong(&ok1);
+                  const int p = w[2].toInt(&ok2);
+                  if (ok1 && ok2) f->noteOff(p, t); else bad(line);
+                  }
+            else if (w[0] == "POS" && w.size() >= 5 && w[3].startsWith("tick=")) {
+                  const int tick = w[3].mid(5).toInt(&ok1);
+                  if (!ok1) { bad(line); continue; }
+                  if (w[4] == "restart") f->restart();
+                  else if (w[4] == "advance") f->advanceTo(Fraction::fromTicks(tick));
+                  else f->setPosition(Fraction::fromTicks(tick));
+                  printf("%-60s | replay -> %d\n", qPrintable(line), f->currentIndex());
+                  }
+            else if (w[0] == "ON" && w.size() >= 4 && w[3].contains("->")) {
+                  const qint64 t = w[1].toLongLong(&ok1);
+                  const int p = w[2].toInt(&ok2);
+                  const QStringList ba = w[3].split("->");
+                  bool ok3 = false;
+                  const int after = ba.value(1).toInt(&ok3);
+                  if (!ok1 || !ok2 || !ok3) { bad(line); continue; }
+                  ++ons;
+                  f->noteOn(p, t);
+                  const bool diff = f->currentIndex() != after;
+                  if (diff) { ++diffs; if (firstDiff < 0) firstDiff = lineNo; }
+                  printf("%-60s | replay -> %d %s%s\n", qPrintable(line), f->currentIndex(),
+                         qPrintable(f->lastReason()), diff ? "   <== DIFFERENT" : "");
+                  }
+            else
+                  bad(line);
+            }
+      printf("\n%d notes replayed, %d decisions differ from the log", ons, diffs);
+      if (firstDiff > 0)
+            printf(" (first at line %d)", firstDiff);
+      puts("");
+      return 0;
+      }
+
+int main(int argc, char** argv) {
+      qSetGlobalQHashSeed(0);       // same note order inside chords on every run
+      if (argc > 1)
+            return replay(argv[1]);
+
       ScoreFollower f;
       // 4-voice hymn
       std::vector<ScoreFollower::Event> hymn = {
@@ -58,7 +182,7 @@ int main() {
       reset(f, hymn);
       chord(f, {67,64,60,48}); chord(f, {67,62,59,55}); CHECK(f.currentIndex()==1, "fumble: at chord 2");
       chord(f, {64,48});       CHECK(f.currentIndex()==1, "fumble: two notes two chords ahead do not move");
-      chord(f, {64,60,48});    CHECK(f.currentIndex()==0, "fumble: three notes of chord 1/4 (identical) move to the nearest");
+      chord(f, {64,60,48});    CHECK(f.currentIndex()==1, "fumble: one deviating chord (= chord 1/4) does not jump");
       chord(f, {69,65,60,53}); CHECK(f.currentIndex()==2, "fumble: playing chord 3 correctly brings it back");
       chord(f, {67,64,60,48}); CHECK(f.currentIndex()==3, "fumble: and on to chord 4");
       chord(f, {65,62,59,55}); CHECK(f.currentIndex()==4, "fumble: chord 5");
@@ -145,6 +269,13 @@ int main() {
       CHECK(f.lost(), "lost: after six notes that fit nowhere");
       chord(f, {67,62,59,55}); CHECK(f.currentIndex()==1 && !f.lost(), "lost: right chord -> found again");
 
+      // review 8: a skipped chord followed by two identical chords: the second strike
+      // confirms (it must not re-propose and restart the confirmation)
+      reset(f, {ev(0,{60,64,67}), ev(480,{62,65,69}), ev(960,{55,59,62}), ev(1440,{55,59,62}), ev(1920,{57,60,64}), ev(2400,{72})});
+      chord(f, {60,64,67});
+      chord(f, {55,59,62}); chord(f, {55,59,62}); CHECK(f.currentIndex()==3, "skipped chord, then B B: confirmed on the second B");
+      chord(f, {57,60,64}); CHECK(f.currentIndex()==4, "and on");
+
       // Psalm 25 opening (shared tones between chords) with MIDI echo
       std::vector<ScoreFollower::Event> ps25 = {
             ev(0,{65,60,57,53}), ev(960,{67,64,57,45}), ev(1440,{65,61,53,49}), ev(1920,{60,64,57,48}) };
@@ -206,8 +337,8 @@ int main() {
       std::vector<ScoreFollower::Event> rec;
       for (int i = 0; i < 40; ++i) rec.push_back(ev(i*480, {40 + i}));
       reset(f, rec); chord(f,{40});
-      for (int p : {70,71,72,73,74,75,76,77}) chord(f, {p});
-      CHECK(f.currentIndex()==37, "recovered after misses");
+      for (int p : {48,49,50,51,52,53,54,55}) chord(f, {p});
+      CHECK(f.currentIndex()==0 && f.lost(), "far away: no automatic jump, the cursor says lost (click a note)");
 
       // stress: generated 4-voice piece (stepwise voices), played with random
       // wrong notes and fumbled chords
@@ -274,7 +405,18 @@ int main() {
                         const std::vector<int>& mv = moves[i];
                         for (size_t q = 0; q < mv.size(); q += 2) { int k = mv[q]; if (heldKey[k] >= 0) f.noteOff(heldKey[k]); }
                         qint64 t = now;
-                        for (size_t q = 0; q < mv.size(); q += 2) { int k = mv[q]; heldKey[k] = mv[q + 1]; f.noteOn(mv[q + 1], t); t += 5; }
+                        for (size_t q = 0; q < mv.size(); q += 2) {
+                              int k = mv[q], np = mv[q + 1];
+                              // one key cannot be down twice: another voice holding it lets go first
+                              for (int o = 0; o < 4; ++o) if (o != k && heldKey[o] == np) { f.noteOff(np); heldKey[o] = -1; }
+                              heldKey[k] = np; f.noteOn(np, t); t += 5;
+                              }
+                        if (i - f.currentIndex() > 2) {
+                              printf("DEBUG2 round %d chord %d at %d (%s); new:", round, i, f.currentIndex(), qPrintable(f.lastReason()));
+                              for (size_t q = 0; q < mv.size(); q += 2) printf(" %d", mv[q + 1]);
+                              printf(" | events:"); for (int e = qMax(0, f.currentIndex()); e <= i; ++e) { printf(" [%d:", e); for (int p : piece[e].pitches) printf(" %d", p); printf("]"); }
+                              puts("");
+                              }
                         maxLead  = qMax(maxLead, f.currentIndex() - i);
                         worstLag = qMax(worstLag, i - f.currentIndex());
                         }
@@ -334,6 +476,83 @@ int main() {
             puts("");
             CHECK(maxLead <= 1, "stress 3: never more than one chord ahead");
             CHECK(endOk == 10, "stress 3: always ends on the last chord");
+      }
+
+      // the real Psalm 25 (tools/scorefollower-test/psalm025.events): the F major
+      // chord occurs six times, chords 15 and 16 are identical, bars 7-8 repeat bars 1-2
+      {
+            const std::vector<ScoreFollower::Event> ps = loadEvents("C:/ms3/follow/tools/scorefollower-test/psalm025.events");
+            CHECK(ps.size() == 152, "Psalm 25: chord list loaded");
+            if (ps.size() == 152) {
+                  QFile::remove("C:/ms3/sftest/psalm25-scenario.log");
+                  f.setLogFile("C:/ms3/sftest/psalm25-scenario.log");     // also checks the log/replay path
+                  reset(f, ps);
+                  for (int i = 0; i <= 21; ++i) strike(f, ps[i].pitches);
+                  CHECK(f.currentIndex() == 21, "Psalm 25: followed to chord 21 (bar 8)");
+                  // bar 8 played differently: two F major chords in other voicings
+                  strike(f, QSet<int>({ 41, 57, 60, 65 }));
+                  strike(f, QSet<int>({ 53, 57, 60, 65, 69 }));
+                  CHECK(f.currentIndex() >= 21, "Psalm 25: other chords in bar 8 do not jump back to bar 7");
+                  for (int i = 22; i <= 40; ++i) strike(f, ps[i].pitches);
+                  CHECK(f.currentIndex() == 40, "Psalm 25: and on from there");
+                  f.setLogFile(QString());
+
+                  // whole psalm with mistakes, ten times
+                  unsigned seed = 99;
+                  auto rnd = [&](int n) { seed = seed * 1103515245u + 12345u; return int((seed >> 16) % unsigned(n)); };
+                  int maxLead = 0, worstLag = 0, endOk = 0, maxBack = 0;
+                  for (int round = 0; round < 30; ++round) {
+                        reset(f, ps);
+                        int prev = 0;
+                        for (int i = 0; i < 152; ++i) {
+                              auto watch = [&](const char* what, int bef) {
+                                    const int d = f.currentIndex() - bef;
+                                    if (d > 1 || d < -1) {
+                                          printf("JUMP round %d at chord %d during %s: %d -> %d (%s)", round, i, what, bef, f.currentIndex(), qPrintable(f.lastReason()));
+                                          puts("");
+                                          }
+                                    };
+                              if (rnd(100) < 20) { int b = 1 + rnd(4); for (int k = 0; k < b; ++k) { now += 120; int w = 45 + rnd(30); int bef = f.currentIndex(); f.noteOn(w, now); f.noteOff(w); watch("wrong note", bef); } }
+                              if (rnd(100) < 10) {      // a chord played differently: an F major voicing
+                                    static const QSet<int> fmaj[3] = { {41,57,60,65}, {53,57,60,65,69}, {48,53,57,65} };
+                                    int bef = f.currentIndex();
+                                    now += 500; for (int p : down) f.noteOff(p); down.clear();
+                                    qint64 t = now;
+                                    for (int p : fmaj[rnd(3)]) {
+                                          int b2 = f.currentIndex();
+                                          f.noteOn(p, t); down.push_back(p); t += 5;
+                                          if (f.currentIndex() != b2 && (f.currentIndex() - b2 > 1 || b2 - f.currentIndex() > 1)) {
+                                                printf("  NOTE %d: %d -> %d (%s)", p, b2, f.currentIndex(), qPrintable(f.lastReason()));
+                                                puts("");
+                                                }
+                                          }
+                                    watch("other F chord", bef);
+                                    }
+                              const int bef = f.currentIndex();
+                              strike(f, ps[i].pitches);
+                              if (i - f.currentIndex() == 4) {
+                                    printf("LAG round %d chord %d: follower %d (%s) | played:", round, i, f.currentIndex(), qPrintable(f.lastReason()));
+                                    for (int p : ps[i].pitches) printf(" %d", p);
+                                    printf(" | events:"); for (int e = f.currentIndex(); e <= i; ++e) { printf(" [%d:", e); for (int p : ps[e].pitches) printf(" %d", p); printf("]"); }
+                                    puts("");
+                                    }
+                              if ((f.currentIndex() - i > 1 || bef - f.currentIndex() > 1) && maxLead <= 1 && maxBack <= 1) {
+                                    printf("DEBUG-PS round %d chord %d: %d -> %d (%s)", round, i, bef, f.currentIndex(), qPrintable(f.lastReason()));
+                                    puts("");
+                                    }
+                              maxLead  = qMax(maxLead, f.currentIndex() - i);
+                              worstLag = qMax(worstLag, i - f.currentIndex());
+                              maxBack  = qMax(maxBack, prev - f.currentIndex());
+                              prev = f.currentIndex();
+                              }
+                        if (f.currentIndex() == 151) ++endOk;
+                        }
+                  printf("      Psalm 25 with mistakes: max lead %d, worst lag %d, biggest jump back %d, ended right %d/30", maxLead, worstLag, maxBack, endOk);
+                  puts("");
+                  CHECK(maxLead <= 1, "Psalm 25 with mistakes: never more than one chord ahead");
+                  CHECK(maxBack <= 1, "Psalm 25 with mistakes: never jumps back more than one chord");
+                  CHECK(endOk == 30, "Psalm 25 with mistakes: always ends on the last chord");
+                  }
       }
 
       printf(fails ? "\n%d FAILURES\n" : "\nALL OK\n", fails);

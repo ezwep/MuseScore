@@ -7141,8 +7141,12 @@ bool MuseScore::scoreFollowReady()
       {
       if (!_scoreFollowOn || !cv || !cs || cv->noteEntryMode() || (seq && seq->isPlaying()))
             return false;
-      if (!_scoreFollower)
+      if (!_scoreFollower) {
             _scoreFollower = new ScoreFollower;
+            // diagnostic log: what came in and what was decided (replayable)
+            _scoreFollower->setLogFile(QDir::temp().filePath("MuseScoreMeelezen.log"));
+            }
+
       _scoreFollower->setScore(cs);
       return true;
       }

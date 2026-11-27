@@ -17,8 +17,10 @@
 #include <QSet>
 #include <QHash>
 #include <QElapsedTimer>
+#include <QString>
 #include "libmscore/fraction.h"
 
+class QFile;
 
 namespace Ms {
 
@@ -65,14 +67,21 @@ class ScoreFollower {
       // happens to hit a chord ahead does not move the position
       std::vector<Attack> _attacks;
       std::vector<Attack> _recent;      // all recent attacks (for "which chord was just struck")
+      // A jump other than to the next chord must be confirmed by a second,
+      // separate strike: one deviating chord is not enough to jump.
+      int _farCand         { -1 };      // event the previous strike pointed to (confirmed by a strike on the next one)
+      qint64 _farCandTime  { 0 };       // when that strike began
 
-      int _misses          { 0 };       // attacks without progress (recovery cadence)
-      int _stuck           { 0 };       // attacks without progress (for lost(), not reset by recovery attempts)
-      std::vector<Attack> _history;     // last played attacks (for recovery)
+      int _stuck           { 0 };       // attacks without progress (for lost())
       QHash<int, qint64> _held;         // pitches currently down -> time pressed
       qint64 _now          { 0 };       // time of the note being processed (ms)
       qint64 _lastMove     { -1000000 };// time of the last forward move (ms)
       QElapsedTimer _clock;
+
+      // diagnostic log (what came in, what was decided and why)
+      QFile* _log          { nullptr };
+      int _logLines        { 0 };
+      QString _why;
 
       bool needsRebuild() const;
       bool ensureEvents();
@@ -80,30 +89,32 @@ class ScoreFollower {
       void setCurrent(int idx, const QSet<int>& consumed);
       int matchPitch(int idx, int pitch, const QSet<int>& consumed, bool octave) const;
       int evidenceCount(int idx, bool* unexplained = nullptr, qint64* first = nullptr, qint64* last = nullptr) const;
-
       int needed(int idx) const;
-      int chooseCandidate() const;
+      bool farPending() const;
+      bool struckBefore(int idx, int need, qint64 before) const;
+      int chooseCandidate();
       QSet<int> lastStrike() const;
       bool nextVerse();
-      bool fitsHistory(int last) const;
-      int recover() const;
       int nearestRun(const Fraction& tick, int hint) const;
+      bool noteOnImpl(int pitch, qint64 ms);
+      void logLine(const QString& line);
+      void logEvents();
 
    public:
-      static constexpr int WINDOW         = 3;   // look-ahead in events (bigger skips: recovery, click, next system)
+      static constexpr int WINDOW         = 3;   // look-ahead in events (bigger skips: click, Reset, Next System)
       static constexpr int BACK           = 4;   // look-back in events (recover from a false advance)
       static constexpr int EVIDENCE_MS    = 1500;// played pitches count as evidence this long
       static constexpr int STRIKE_MS      = 150; // a chord further away must be struck together within this time
       static constexpr int RATIO_ATTACKS  = 4;   // last attacks a candidate must mostly explain
       static constexpr int LOST_MISSES    = 6;   // attacks without progress before we call ourselves lost
       static constexpr int VERSE_TAIL     = 2;   // last events from which the first chord means "next verse"
-
+      static constexpr int VERSE_PAUSE_MS = 1200;// silence before the opening chord that marks a new verse
       static constexpr int CHORD_MS       = 60;  // notes within this time after a move belong to the same chord
-
+      static constexpr qint64 LOG_MAX_BYTES = 5 * 1024 * 1024;
       static constexpr int HELD_EXPIRE_MS = 20000; // forget a held key after this time (lost note-off)
-      static constexpr int MAX_MISSES     = 8;   // misses before a global recovery search
-      static constexpr int HISTORY        = 6;   // pitches used for recovery
-      static constexpr int RECOVER_SPAN   = 2;   // max spread of recovery candidates
+
+      ScoreFollower() { _clock.start(); }
+      ~ScoreFollower();
 
       void setScore(Score* s);
       Score* score() const { return _score; }
@@ -116,18 +127,14 @@ class ScoreFollower {
       // Back to the very first chord of the score.
       bool restart();
 
-
-      ScoreFollower() { _clock.start(); }
-
       // Feed a note-on. Returns true when the position changed.
       bool noteOn(int pitch)               { return noteOn(pitch, _clock.elapsed()); }
       bool noteOn(int pitch, qint64 ms);
-      void noteOff(int pitch)              { _held.remove(pitch); }
-
+      void noteOff(int pitch)              { noteOff(pitch, _clock.elapsed()); }
+      void noteOff(int pitch, qint64 ms);
 
       // Moves forward to the first event at or after tick; a repeat jump on
       // the way counts as destination. Never moves backward.
-
       bool advanceTo(const Fraction& tick);
 
       bool hasPosition() const { return _cur >= 0 && _cur < int(_events.size()); }
@@ -135,9 +142,14 @@ class ScoreFollower {
       bool lost() const        { return hasPosition() && _stuck >= LOST_MISSES; }
       Fraction tick() const    { return hasPosition() ? _events[_cur].tick : Fraction(-1, 1); }
 
+      // Write a diagnostic log (empty path: off). Every rebuild writes the
+      // chord list, every note what was decided; the test tool can replay it.
+      void setLogFile(const QString& path);
+
       // for testing
       void setEvents(const std::vector<Event>& ev);
       int currentIndex() const { return _cur; }
+      const QString& lastReason() const { return _why; }
       };
 
 } // namespace Ms

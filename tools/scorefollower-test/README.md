@@ -16,6 +16,25 @@ De linkerwaarschuwingen over onopgeloste partituurfuncties zijn verwacht
 
 De hele app bouwen: `tools\build-follow.cmd` (kopie van `C:\ms3\build-follow.cmd`).
 
+## Een opname naspelen
+
+MuseScore schrijft tijdens het meelezen een logboek naar `%TEMP%\MuseScoreMeelezen.log`
+(bij 5 MB wordt het `.log.1`). Daarin staan de grepen van het stuk en per noot wat er
+besloten werd en waarom. Naspelen met de huidige code:
+
+    C:\ms3\sftest\sftest.exe "$env:TEMP\MuseScoreMeelezen.log"
+
+Per noot staat er wat de app toen besloot en wat de code nu besluit (`<== DIFFERENT`).
+
+## Echte partituren als test
+
+`mscx2events.py` haalt de grepen uit een `.mscx` (zonder herhalingen):
+
+    python -I mscx2events.py "Psalm 025.mscx" > psalm025.events
+
+De test gebruikt `psalm025.events` (Psalm 25, Noordzij) voor een scenario en een
+stresstest met fouten.
+
 ## Terug naar een eerdere versie
 
 Elke ronde heeft een tag: `meelezen-1` ... `meelezen-4` (zie `git tag`).
