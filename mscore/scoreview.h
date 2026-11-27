@@ -194,6 +194,12 @@ class ScoreView : public QWidget, public MuseScoreView {
       const void* _followTargetSystem { nullptr };  // system _followAnim brings to the top (compared only)
       bool _followAnimating { false };              // offset change made by _followAnim itself
       bool _followLost { false };                   // score follower lost track (orange cursor)
+      // score follower feedback drawn over the score (nothing is changed in it)
+      bool _followMarks { false };
+      Fraction _followMarkTick;
+      QSet<int> _followPlayed;
+      QSet<int> _followWrong;
+      QList<QPair<QRectF, int>> _followPractice;  // measures with mistakes (canvas rect, count)
 
 
       QColor _cursorColor;
@@ -410,6 +416,9 @@ class ScoreView : public QWidget, public MuseScoreView {
       bool systemFullyVisible(const System* sys) const;
       void stopFollowScroll();
       void setFollowLost(bool lost);
+      void setFollowMarks(bool on, const Fraction& tick, const QSet<int>& played, const QSet<int>& wrong);
+      void setFollowPractice(const QList<QPair<QRectF, int>>& measures);
+      void drawFollowMarks(QPainter& p);
 
 
       void scrollSystemToTop(const System* sys);

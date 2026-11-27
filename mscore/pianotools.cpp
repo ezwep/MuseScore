@@ -262,10 +262,28 @@ void HPiano::updateAllKeys()
       for (PianoKeyItem* key : qAsConst(keys)) {
             key->setPressed(_pressedPitches.contains(key->pitch())
                             || _pressedPlaybackPitches.contains(key->pitch()));
+            key->setFollow(_followOn && _followExpected.contains(key->pitch()),
+                           _followOn && _followWrong.contains(key->pitch()));
             key->update();
             }
       // Force redraw
       scene()->invalidate();
+      }
+
+//---------------------------------------------------------
+//   setFollowFeedback
+//    score follower: keys of the chord being followed, and
+//    pressed keys that are wrong there
+//---------------------------------------------------------
+
+void HPiano::setFollowFeedback(bool on, const QSet<int>& expected, const QSet<int>& wrong)
+      {
+      if (on == _followOn && expected == _followExpected && wrong == _followWrong)
+            return;
+      _followOn = on;
+      _followExpected = expected;
+      _followWrong = wrong;
+      updateAllKeys();
       }
 
 void HPiano::setMaximum(bool top_level) {
@@ -432,11 +450,17 @@ void PianoKeyItem::paint(QPainter* p, const QStyleOptionGraphicsItem* /*o*/, QWi
       const bool showSelectionState = !piano->playbackActive();
       p->setRenderHint(QPainter::Antialiasing, true);
       p->setPen(QPen(Qt::black, .8));
-      if (_pressed) {
+      if (_pressed && piano->followOn()) {
+            // following: a pressed key is green when it belongs here, red when not
+            p->setBrush(_followWrong ? QColor(220, 40, 40, 200) : QColor(30, 170, 80, 200));
+            }
+      else if (_pressed) {
             QColor c(preferences.getColor(PREF_UI_PIANO_USER_INPUT_COLOR));
             c.setAlpha(180);
             p->setBrush(c);
             }
+      else if (_followExpected)
+            p->setBrush(isBlackKey ? QColor(40, 110, 70) : QColor(190, 230, 200));
       else if (showSelectionState && _selected) {
             QColor c(preferences.getColor(PREF_UI_PIANO_HIGHLIGHTCOLOR));
             c.setAlpha(100);

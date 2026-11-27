@@ -37,6 +37,8 @@ class PianoKeyItem : public QGraphicsPathItem {
       bool _pressed;
       bool _highlighted;
       bool _selected;
+      bool _followExpected { false };   // part of the chord being followed
+      bool _followWrong    { false };   // pressed, but not in the score here
       HPiano* piano { nullptr };
 
       virtual void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget = 0);
@@ -50,6 +52,7 @@ class PianoKeyItem : public QGraphicsPathItem {
       void setPressed(bool p) { _pressed = p; }
       void setHighlighted(bool h) { _highlighted = h; }
       void setSelected(bool s) { _selected = s; }
+      void setFollow(bool expected, bool wrong) { _followExpected = expected; _followWrong = wrong; }
       };
 
 //---------------------------------------------------------
@@ -68,6 +71,9 @@ class HPiano : public QGraphicsView {
       qreal scaleVal;
 
       bool _playbackActive { false };
+      bool _followOn { false };          // score follower shows right / wrong keys
+      QSet<int> _followExpected;
+      QSet<int> _followWrong;
 
       virtual void wheelEvent(QWheelEvent*);
       virtual bool event(QEvent* event);
@@ -94,6 +100,8 @@ class HPiano : public QGraphicsView {
       QSet<int>& pressedPlaybackPitches() { return _pressedPlaybackPitches; }
       void setPlaybackActive(bool active);
       bool playbackActive() const { return _playbackActive; }
+      void setFollowFeedback(bool on, const QSet<int>& expected, const QSet<int>& wrong);
+      bool followOn() const { return _followOn; }
       virtual QSize sizeHint() const;
 
    public slots:
@@ -133,6 +141,7 @@ class PianoTools : public QDockWidget {
       void clearSelection();
       void changeSelection(const Selection& selection);
       void updateAllKeys() { _piano->updateAllKeys(); }
+      void setFollowFeedback(bool on, const QSet<int>& expected, const QSet<int>& wrong) { _piano->setFollowFeedback(on, expected, wrong); }
       };
 
 

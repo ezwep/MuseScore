@@ -280,6 +280,9 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       QAction* _scoreFollowLearnNext       { nullptr };
       QAction* _scoreFollowLearnReset      { nullptr };
       QMenu* _scoreFollowChannelMenu       { nullptr };
+      QAction* _scoreFollowShowMistakes    { nullptr };
+      QAction* _scoreFollowPractice        { nullptr };
+      QSet<int> _followWrongKeys;                                   // keys held down that are wrong here
       enum { FOLLOW_LEARN_NONE, FOLLOW_LEARN_NEXT, FOLLOW_LEARN_RESET, FOLLOW_LEARN_IGNORE };
       int _scoreFollowLearning             { FOLLOW_LEARN_NONE };   // waiting for a MIDI message to learn
       int _scoreFollowLearnSession         { 0 };
@@ -531,6 +534,8 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       bool scoreFollowIgnores(int channel) const;
       void scoreFollowLearn(int what);
       void updateScoreFollowMenu();
+      void scoreFollowFeedback();
+      void scoreFollowUpdatePractice(bool report);
       QString scoreFollowTriggerText(const char* prefKey) const;
       bool isScoreFollowTrigger(const char* type, int channel, int number) const;
 

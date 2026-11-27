@@ -1121,6 +1121,7 @@ void ScoreView::paintEvent(QPaintEvent* ev)
       _curLoopIn->paint(&vp);
       _curLoopOut->paint(&vp);
       _cursor->paint(&vp);
+      drawFollowMarks(vp);
       if (_score->layoutMode() == LayoutMode::LINE)
             _controlCursor->paint(&vp);
 
@@ -3864,6 +3865,88 @@ void ScoreView::setFollowLost(bool lost)
             moveCursor(_cursor->tick(), true);
             update(_matrix.mapRect(_cursor->rect()).toRect().adjusted(-1,-1,1,1));
             }
+      }
+
+//---------------------------------------------------------
+//   setFollowMarks / setFollowPractice
+//---------------------------------------------------------
+
+void ScoreView::setFollowMarks(bool on, const Fraction& tick, const QSet<int>& played, const QSet<int>& wrong)
+      {
+      _followMarks    = on;
+      _followMarkTick = tick;
+      _followPlayed   = played;
+      _followWrong    = wrong;
+      update();
+      }
+
+void ScoreView::setFollowPractice(const QList<QPair<QRectF, int>>& measures)
+      {
+      _followPractice = measures;
+      update();
+      }
+
+//---------------------------------------------------------
+//   drawFollowMarks
+//    Over the score, at the follow position: the notes of the
+//    chord played (green ring) or still to play (grey ring),
+//    and keys held that are wrong as small red note heads on
+//    the staff. Measures with mistakes (practice overview) get
+//    a light red tint. Only drawn, nothing in the score changes.
+//---------------------------------------------------------
+
+void ScoreView::drawFollowMarks(QPainter& p)
+      {
+      const qreal sp = score()->spatium();
+      for (const auto& m : qAsConst(_followPractice)) {
+            const int alpha = qMin(110, 25 + 20 * m.second);
+            p.fillRect(m.first, QColor(230, 60, 60, alpha));
+            }
+      if (!_followMarks || noteEntryMode())
+            return;
+      Measure* measure = score()->tick2measureMM(_followMarkTick);
+      if (!measure || !measure->system())
+            return;
+      Segment* seg = measure->findSegment(SegmentType::ChordRest, _followMarkTick);
+      if (!seg)
+            return;
+      p.save();
+      p.setBrush(Qt::NoBrush);
+      for (int track = 0; track < score()->ntracks(); ++track) {
+            Element* e = seg->element(track);
+            if (!e || !e->isChord())
+                  continue;
+            for (const Note* n : toChord(e)->notes()) {
+                  if (n->tieBack())
+                        continue;
+                  const bool played = _followPlayed.contains(n->ppitch());
+                  QPen pen(played ? QColor(30, 170, 80) : QColor(140, 140, 140), sp * 0.18);
+                  if (!played)
+                        pen.setStyle(Qt::DotLine);
+                  p.setPen(pen);
+                  p.drawEllipse(n->canvasBoundingRect().adjusted(-sp * 0.3, -sp * 0.3, sp * 0.3, sp * 0.3));
+                  }
+            }
+      // wrong keys: a red note head where that pitch would be written
+      System* sys = measure->system();
+      const qreal x = seg->canvasPos().x() + sp * 2.6;
+      for (int pitch : qAsConst(_followWrong)) {
+            // top staff for the treble range, the lowest visible staff for the bass
+            int staffIdx = 0;
+            if (pitch < 60) {
+                  for (int i = score()->nstaves() - 1; i >= 0; --i)
+                        if (score()->staff(i)->show() && sys->staff(i)->show()) { staffIdx = i; break; }
+                  }
+            Staff* st = score()->staff(staffIdx);
+            const ClefType clef = st->clef(_followMarkTick);
+            const int tpc  = pitch2tpc(pitch, st->key(_followMarkTick), Prefer::NEAREST);
+            const int line = relStep(pitch, tpc, clef);
+            const qreal y = sys->staffYpage(staffIdx) + sys->page()->pos().y() + line * sp * 0.5 * st->lineDistance(_followMarkTick);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(220, 40, 40, 210));
+            p.drawEllipse(QRectF(x - sp * 0.65, y - sp * 0.45, sp * 1.3, sp * 0.9));
+            }
+      p.restore();
       }
 
 //---------------------------------------------------------

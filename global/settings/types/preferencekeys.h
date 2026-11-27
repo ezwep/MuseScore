@@ -49,6 +49,7 @@
 #define PREF_APP_PLAYBACK_SCOREFOLLOW                       "application/playback/scoreFollow"
 #define PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT              "application/playback/scoreFollowScrollAt"
 #define PREF_APP_PLAYBACK_SCOREFOLLOW_IGNORECHANNELS        "application/playback/scoreFollowIgnoreChannels"
+#define PREF_APP_PLAYBACK_SCOREFOLLOW_SHOWMISTAKES          "application/playback/scoreFollowShowMistakes"
 #define PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER           "application/playback/scoreFollowNextTrigger"
 #define PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER          "application/playback/scoreFollowResetTrigger"
 #define PREF_APP_PLAYBACK_PLAYREPEATS                       "application/playback/playRepeats"

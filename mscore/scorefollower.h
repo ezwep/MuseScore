@@ -102,6 +102,7 @@ class ScoreFollower {
 
       int _stuck           { 0 };       // notes in a row without a match on the best path
       QHash<int, qint64> _held;         // keys down -> time pressed
+      std::vector<int> _mistakes;       // wrong notes per event (practice overview)
       std::vector<Attack> _recent;      // recent attacks (strikes, verse pause)
       qint64 _now          { 0 };
       QElapsedTimer _clock;
@@ -148,6 +149,16 @@ class ScoreFollower {
       void noteOff(int pitch, qint64 ms);
 
       bool hasPosition() const { return _cur >= 0 && _cur < int(_events.size()); }
+      // the chord at the shown position, and its pitches played so far
+      QSet<int> currentPitches() const { return hasPosition() ? _events[_cur].pitches : QSet<int>(); }
+      QSet<int> currentPlayed() const;
+      // does a played pitch belong where the player is (this chord, the next
+      // one already, or an octave of this chord)?
+      bool fits(int pitch) const;
+      // wrong notes per event since the last restart / clearMistakes()
+      const std::vector<int>& mistakes() const { return _mistakes; }
+      const std::vector<Event>& events() const { return _events; }
+      void clearMistakes()     { _mistakes.assign(_events.size(), 0); }
       // several notes in a row fitted nowhere near the position
       bool lost() const        { return hasPosition() && _stuck >= LOST_MISSES; }
       Fraction tick() const    { return hasPosition() ? _events[_cur].tick : Fraction(-1, 1); }

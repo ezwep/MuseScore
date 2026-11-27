@@ -15157,6 +15157,22 @@ This plugin requires an open score to run.</source>
         <source>Learned: %1</source>
         <translation>Ingeleerd: %1</translation>
     </message>
+    <message>
+        <source>Show mistakes</source>
+        <translation>Fouten tonen</translation>
+    </message>
+    <message>
+        <source>Practice overview: bars with mistakes</source>
+        <translation>Oefenoverzicht: maten met fouten</translation>
+    </message>
+    <message>
+        <source>%1 wrong notes in %2 bars (Reset starts a new count)</source>
+        <translation>%1 foute noten in %2 maten (Opnieuw begint een nieuwe telling)</translation>
+    </message>
+    <message>
+        <source>No mistakes counted (Reset starts a new count)</source>
+        <translation>Geen fouten geteld (Opnieuw begint een nieuwe telling)</translation>
+    </message>
 </context>
 <context>
     <name>Ms::MuseScoreApplication</name>

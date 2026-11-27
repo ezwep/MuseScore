@@ -1756,6 +1756,19 @@ MuseScore::MuseScore()
             preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT, sa->data().toInt());
             });
 
+      // mistakes: shown while playing, and a practice overview of the bars
+      _scoreFollowMenu->addSeparator();
+      _scoreFollowShowMistakes = _scoreFollowMenu->addAction(QString());
+      _scoreFollowShowMistakes->setCheckable(true);
+      _scoreFollowShowMistakes->setChecked(preferences.getBool(PREF_APP_PLAYBACK_SCOREFOLLOW_SHOWMISTAKES));
+      connect(_scoreFollowShowMistakes, &QAction::toggled, this, [this](bool on) {
+            preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_SHOWMISTAKES, on);
+            scoreFollowFeedback();
+            });
+      _scoreFollowPractice = _scoreFollowMenu->addAction(QString());
+      _scoreFollowPractice->setCheckable(true);
+      connect(_scoreFollowPractice, &QAction::toggled, this, [this](bool) { scoreFollowUpdatePractice(true); });
+
       // MIDI keys (or pistons) for Next System and Reset: learned with channel
       _scoreFollowMenu->addSeparator();
       _scoreFollowLearnNext  = _scoreFollowMenu->addAction(QString());
@@ -3887,8 +3900,11 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
       // the score follower must see every key release, also when a dialog is
       // open or the note is a remote control, so that no key stays "held"
       // (all channels: a MIDI bridge or the organ may use any channel, also 10)
-      if (!velo && _scoreFollower && !scoreFollowIgnores(channel))
+      if (!velo && _scoreFollower && !scoreFollowIgnores(channel)) {
             _scoreFollower->noteOff(pitch);
+            if (_followWrongKeys.remove(pitch))
+                  scoreFollowFeedback();
+            }
 
       // learned MIDI keys for Next System / Reset (and learning them)
       if (scoreFollowMidiInput("note", channel, pitch, velo > 0))
@@ -7251,8 +7267,14 @@ void MuseScore::scoreFollowHideCursor()
       {
       ScoreView* v = _scoreFollowView;
       _scoreFollowView = nullptr;
-      if (v)
+      if (v) {
             v->stopFollowScroll();
+            v->setFollowMarks(false, Fraction(), QSet<int>(), QSet<int>());
+            v->setFollowPractice(QList<QPair<QRectF, int>>());
+            }
+      _followWrongKeys.clear();
+      if (_pianoTools)
+            _pianoTools->setFollowFeedback(false, QSet<int>(), QSet<int>());
       if (v && !v->noteEntryMode() && (!seq || !seq->isPlaying()))
             v->setCursorOn(false);
 
@@ -7268,6 +7290,9 @@ void MuseScore::scoreFollowNoteOn(int pitch)
             return;
       const bool moved = _scoreFollower->noteOn(pitch);
       cv->setFollowLost(_scoreFollower->lost());
+      if (!_scoreFollower->fits(pitch))
+            _followWrongKeys.insert(pitch);
+      scoreFollowFeedback();
       if (moved) {
             // the position moved away from the selection: clicking the
             // selected note again must re-anchor
@@ -7313,6 +7338,7 @@ void MuseScore::scoreFollowUpdateView()
             cv->followPosition(_scoreFollower->tick());
             _scoreFollowView = cv;
             }
+      scoreFollowFeedback();
       }
 
 //---------------------------------------------------------
@@ -7330,6 +7356,59 @@ void MuseScore::scoreFollowReset()
       _scoreFollowSelKey  = nullptr;
       _scoreFollowSelTick = Fraction(-1, 1);
       scoreFollowUpdateView();
+      }
+
+//---------------------------------------------------------
+//   scoreFollowFeedback
+//    right / wrong keys on the piano keyboard and over the score
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowFeedback()
+      {
+      const bool on = _scoreFollowOn && preferences.getBool(PREF_APP_PLAYBACK_SCOREFOLLOW_SHOWMISTAKES)
+                      && _scoreFollower && _scoreFollower->hasPosition() && cv && !cv->noteEntryMode()
+                      && (!seq || !seq->isPlaying());
+      const QSet<int> none;
+      if (_pianoTools)
+            _pianoTools->setFollowFeedback(on, on ? _scoreFollower->currentPitches() : none, on ? _followWrongKeys : none);
+      if (cv)
+            cv->setFollowMarks(on, on ? _scoreFollower->tick() : Fraction(), on ? _scoreFollower->currentPlayed() : none,
+                               on ? _followWrongKeys : none);
+      if (_scoreFollowPractice && _scoreFollowPractice->isChecked())
+            scoreFollowUpdatePractice(false);
+      }
+
+//---------------------------------------------------------
+//   scoreFollowUpdatePractice
+//    practice overview: bars with wrong notes (since Reset)
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowUpdatePractice(bool report)
+      {
+      if (!cv)
+            return;
+      QList<QPair<QRectF, int>> marks;
+      if (_scoreFollowPractice->isChecked() && _scoreFollower && cs && _scoreFollower->score() == cs) {
+            QHash<Measure*, int> perMeasure;
+            const auto& ev = _scoreFollower->events();
+            const auto& mis = _scoreFollower->mistakes();
+            for (size_t i = 0; i < mis.size() && i < ev.size(); ++i) {
+                  if (mis[i] <= 0)
+                        continue;
+                  if (Measure* m = cs->tick2measureMM(ev[i].tick))
+                        perMeasure[m] += mis[i];
+                  }
+            int total = 0;
+            for (auto it = perMeasure.constBegin(); it != perMeasure.constEnd(); ++it) {
+                  if (it.key()->system())
+                        marks.append({ it.key()->canvasBoundingRect(), it.value() });
+                  total += it.value();
+                  }
+            if (report)
+                  showMessage(total ? tr("%1 wrong notes in %2 bars (Reset starts a new count)").arg(total).arg(perMeasure.size())
+                                    : tr("No mistakes counted (Reset starts a new count)"), 8000);
+            }
+      cv->setFollowPractice(marks);
       }
 
 //---------------------------------------------------------
@@ -7373,6 +7452,8 @@ void MuseScore::updateScoreFollowMenu()
       _scoreFollowLearnNext->setText(tr("Next System: learn MIDI key… (now: %1)").arg(scoreFollowTriggerText(PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER)));
       _scoreFollowLearnReset->setText(tr("Reset: learn MIDI key… (now: %1)").arg(scoreFollowTriggerText(PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER)));
       _scoreFollowChannelMenu->setTitle(tr("Ignore MIDI channels"));
+      _scoreFollowShowMistakes->setText(tr("Show mistakes"));
+      _scoreFollowPractice->setText(tr("Practice overview: bars with mistakes"));
       for (QAction* ca : _scoreFollowChannelMenu->actions()) {
             if (!ca->isCheckable()) {
                   if (ca->data().toInt() == -1)

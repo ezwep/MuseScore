@@ -422,6 +422,15 @@ int main(int argc, char** argv) {
       chord(f, {55,59,62}); chord(f, {55,59,62}); CHECK(f.currentIndex()>=2, "skipped chord, then B B: follows (at most one behind)");
       chord(f, {57,60,64}); CHECK(f.currentIndex()==4, "and on");
 
+      // mistakes: what fits, and the practice count per chord
+      reset(f, hymn);
+      chord(f, {67,64,60,48});
+      CHECK(f.fits(64) && f.fits(36) && f.fits(62), "fits: chord note, octave (pedal), next chord");
+      CHECK(!f.fits(61), "fits: a wrong note does not");
+      chord(f, {61}); chord(f, {63});
+      CHECK(f.mistakes().size() == hymn.size() && f.mistakes()[0] == 2, "two wrong notes counted at chord 1");
+      f.restart(); CHECK(f.mistakes()[0] == 0, "Reset starts a new count");
+
       // Psalm 25 opening (shared tones between chords) with MIDI echo
       std::vector<ScoreFollower::Event> ps25 = {
             ev(0,{65,60,57,53}), ev(960,{67,64,57,45}), ev(1440,{65,61,53,49}), ev(1920,{60,64,57,48}) };

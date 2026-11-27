@@ -55,6 +55,7 @@ void ScoreFollower::setScore(Score* s)
       _events.clear();
       _undoState = -1;
       reset();
+      _mistakes.clear();
       }
 
 //---------------------------------------------------------
@@ -81,6 +82,7 @@ void ScoreFollower::setEvents(const std::vector<Event>& ev)
       _score  = nullptr;
       _events = ev;
       reset();
+      clearMistakes();
       logEvents();
       }
 
@@ -163,6 +165,7 @@ void ScoreFollower::rebuild()
             }
 
       reset();
+      clearMistakes();
       if (hadPosition) {
             int idx = nearestRun(oldTick, oldIdx);
             if (idx >= 0)
@@ -472,6 +475,11 @@ bool ScoreFollower::noteOnImpl(int pitch, qint64 ms)
             if (!alive(_v[_cur]) || _v[b] - _v[_cur] >= BACK_MARGIN)
                   _cur = b;
             }
+      if (!fits(pitch) && _cur >= 0) {
+            if (int(_mistakes.size()) != n)
+                  _mistakes.assign(n, 0);
+            ++_mistakes[_cur];
+            }
       _why = QString("%1 best=%2%3").arg(_cur > old ? "ahead" : _cur < old ? "back" : "stay")
              .arg(b).arg(nmatch[b] ? "" : " nomatch");
       return _cur != old;
@@ -532,6 +540,7 @@ bool ScoreFollower::restart()
       if (_log)
             logLine(QString("POS %1 %2->0 tick=0 restart").arg(_clock.elapsed()).arg(_cur));
       startAt(0);
+      clearMistakes();
       return true;
       }
 
@@ -628,6 +637,31 @@ void ScoreFollower::logEvents()
             logLine(QString("E %1 %2 %3%4").arg(i).arg(_events[i].tick.ticks()).arg(sl.join(','))
                     .arg(_events[i].optional ? " opt" : ""));
             }
+      }
+
+//---------------------------------------------------------
+//   currentPlayed
+//---------------------------------------------------------
+
+QSet<int> ScoreFollower::currentPlayed() const
+      {
+      if (!hasPosition() || _cur >= int(_used.size()))
+            return QSet<int>();
+      return _used[_cur];
+      }
+
+//---------------------------------------------------------
+//   fits
+//---------------------------------------------------------
+
+bool ScoreFollower::fits(int pitch) const
+      {
+      if (!hasPosition())
+            return true;
+      const QSet<int>& cur = _events[_cur].pitches;
+      if (cur.contains(pitch) || cur.contains(pitch + 12) || cur.contains(pitch - 12))
+            return true;
+      return _cur + 1 < int(_events.size()) && _events[_cur + 1].pitches.contains(pitch);
       }
 
 //---------------------------------------------------------
