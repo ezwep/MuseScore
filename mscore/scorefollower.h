@@ -118,7 +118,7 @@ class ScoreFollower {
       void startAt(int idx);
       double reward(int idx, int pitch, const QSet<int>& used, int* scorePitch, bool octave) const;
       double forwardMargin(int j) const;
-      double skipCost(int idx) const;
+      double skipCost(int idx, int from) const;
       QSet<int> lastStrike() const;
       bool nextVerse();
       int nearestRun(const Fraction& tick, int hint) const;

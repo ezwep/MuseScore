@@ -221,39 +221,12 @@ static std::vector<int> idealPath(const std::vector<ScoreFollower::Event>& ev, c
       return path;
       }
 
-static int evaluate(const char* path)
+static void evaluateBlock(const std::vector<ScoreFollower::Event>& events,
+                          const std::vector<std::pair<int, std::vector<std::pair<bool, PlayedNote>>>>& segs, int blockNo)
       {
-      QFile file(QString::fromLocal8Bit(path));
-      if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) { printf("cannot open %s\n", path); return 2; }
-      std::vector<ScoreFollower::Event> events;
-      int expect = -1;
-      // segments: from a start position until the next POS
-      struct Segment { int start; std::vector<PlayedNote> notes; std::vector<int> offs; std::vector<qint64> offTimes; };
-      std::vector<std::pair<int, std::vector<std::pair<bool, PlayedNote>>>> segs;   // start, (on?, note)
-      QTextStream in(&file);
-      while (!in.atEnd()) {
-            const QStringList w = in.readLine().split(' ', Qt::SkipEmptyParts);
-            if (w.isEmpty()) continue;
-            if (w[0] == "EVENTS" && w.size() >= 2) { events.clear(); expect = w[1].toInt(); segs.clear(); }
-            else if (w[0] == "E" && w.size() >= 4) {
-                  ScoreFollower::Event e; e.tick = Fraction::fromTicks(w[2].toInt());
-                  for (const QString& p : w[3].split(',')) e.pitches.insert(p.toInt());
-                  e.optional = w.size() > 4 && w[4] == "opt";
-                  events.push_back(e);
-                  }
-            else if (w[0] == "POS" && w.size() >= 3 && w[2].contains("->")) {
-                  segs.push_back({ w[2].split("->")[1].toInt(), {} });
-                  }
-            else if ((w[0] == "ON" || w[0] == "OFF") && w.size() >= 3) {
-                  if (segs.empty()) segs.push_back({ 0, {} });
-                  segs.back().second.push_back({ w[0] == "ON", PlayedNote { w[2].toInt(), w[1].toLongLong() } });
-                  }
-            }
-      if (int(events.size()) != expect || events.empty()) { printf("no complete chord list in the log\n"); return 2; }
-      int total = 0, same = 0, ahead = 0, behind = 0, maxLead = 0, maxLag = 0, backJumps = 0;
+      int total = 0, same = 0, ahead = 0, behind = 0, maxLead = 0, maxLag = 0, backJumps = 0, lostNotes = 0, notesAll = 0;
       for (auto& seg : segs) {
             if (seg.first < 0 || seg.first >= int(events.size())) continue;
-            // the notes the follower really takes (a key already down is not a new attack)
             std::vector<PlayedNote> notes;
             QSet<int> down;
             ScoreFollower f;
@@ -270,24 +243,54 @@ static int evaluate(const char* path)
                   online.push_back(f.currentIndex());
                   if (f.currentIndex() < prev) ++backJumps;
                   prev = f.currentIndex();
+                  ++notesAll; if (f.lost()) ++lostNotes;
                   }
             if (notes.empty()) continue;
             const std::vector<int> ideal = idealPath(events, notes, seg.first);
             for (size_t t = 0; t < notes.size(); ++t) {
-                  // what the player sees: the position after a strike is complete
-                  // (the next note comes more than STRIKE_MS later)
                   if (t + 1 < notes.size() && notes[t + 1].time - notes[t].time <= ScoreFollower::STRIKE_MS)
                         continue;
                   const int d = online[t] - ideal[t];
                   ++total;
                   if (d == 0) ++same; else if (d > 0) ++ahead; else ++behind;
                   maxLead = qMax(maxLead, d); maxLag = qMax(maxLag, -d);
-                  if (qEnvironmentVariableIsSet("SF_STATE") && d != 0)
-                        printf("  t=%lld note %d: follower %d, ideal %d (%+d)\n", notes[t].time, notes[t].pitch, online[t], ideal[t], d);
+                  if (qEnvironmentVariableIsSet("SF_STATE") && qAbs(d) >= 2)
+                        printf("  block %d t=%lld note %d: follower %d, ideal %d (%+d)\n", blockNo, notes[t].time, notes[t].pitch, online[t], ideal[t], d);
                   }
             }
-      printf("%d strikes: %d on the right chord (%.0f%%), %d ahead, %d behind; at most %d ahead, %d behind; %d steps back\n",
-             total, same, total ? 100.0 * same / total : 0.0, ahead, behind, maxLead, maxLag, backJumps);
+      if (total)
+            printf("piece %d (%d chords): %d strikes, %.0f%% on the right chord, %d ahead, %d behind; at most %d ahead, %d behind; %d steps back; lost on %d of %d notes\n",
+                   blockNo, int(events.size()), total, 100.0 * same / total, ahead, behind, maxLead, maxLag, backJumps, lostNotes, notesAll);
+      }
+
+static int evaluate(const char* path)
+      {
+      QFile file(QString::fromLocal8Bit(path));
+      if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) { printf("cannot open %s\n", path); return 2; }
+      std::vector<ScoreFollower::Event> events;
+      std::vector<std::pair<int, std::vector<std::pair<bool, PlayedNote>>>> segs;
+      int block = 0;
+      QTextStream in(&file);
+      while (!in.atEnd()) {
+            const QStringList w = in.readLine().split(' ', Qt::SkipEmptyParts);
+            if (w.isEmpty()) continue;
+            if (w[0] == "EVENTS" && w.size() >= 2) {
+                  if (!events.empty()) evaluateBlock(events, segs, block);
+                  ++block; events.clear(); segs.clear();
+                  }
+            else if (w[0] == "E" && w.size() >= 4) {
+                  ScoreFollower::Event e; e.tick = Fraction::fromTicks(w[2].toInt());
+                  for (const QString& p : w[3].split(',')) e.pitches.insert(p.toInt());
+                  e.optional = w.size() > 4 && w[4] == "opt";
+                  events.push_back(e);
+                  }
+            else if (w[0] == "POS" && w.size() >= 3 && w[2].contains("->")) segs.push_back({ w[2].split("->")[1].toInt(), {} });
+            else if ((w[0] == "ON" || w[0] == "OFF") && w.size() >= 3) {
+                  if (segs.empty()) segs.push_back({ 0, {} });
+                  segs.back().second.push_back({ w[0] == "ON", PlayedNote { w[2].toInt(), w[1].toLongLong() } });
+                  }
+            }
+      if (!events.empty()) evaluateBlock(events, segs, block);
       return 0;
       }
 

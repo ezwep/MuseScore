@@ -204,11 +204,26 @@ void ScoreFollower::startAt(int idx)
 //    optional (ghost) notes cost nothing
 //---------------------------------------------------------
 
-double ScoreFollower::skipCost(int idx) const
+double ScoreFollower::skipCost(int idx, int from) const
       {
       const Event& e = _events[idx];
       if (e.optional)
             return 0.0;
+      // A repeated chord held through: event idx right after 'from' with only
+      // notes of 'from', all still held down, is being played by holding them.
+      // (Only then: a free pass elsewhere would make jumps cheap.)
+      if (from >= 0 && idx == from + 1) {
+            bool heldThrough = true;
+            for (int p : e.pitches) {
+                  auto h = _held.constFind(p);
+                  if (!_events[from].pitches.contains(p) || h == _held.constEnd() || _now - h.value() >= HELD_EXPIRE_MS) {
+                        heldThrough = false;
+                        break;
+                        }
+                  }
+            if (heldThrough)
+                  return 0.0;
+            }
       if (e.pitches.size() == 1)
             return SKIP_SINGLE;     // a passing note left out is common
       return qMin(SKIP_MAX, SKIP_PER_NOTE * e.pitches.size());
@@ -236,7 +251,7 @@ double ScoreFollower::forwardMargin(int j) const
       // measured to keep wrong notes and other voicings from jumping ahead
       double m = FWD_MARGIN + FWD_PER_NOTE * (size - 1);
       for (int k = _cur + 1; k < j; ++k)
-            m += skipCost(k);
+            m += skipCost(k, k == _cur + 1 ? _cur : -1);
       return m;
       }
 
@@ -374,6 +389,17 @@ bool ScoreFollower::noteOnImpl(int pitch, qint64 ms)
             _why = "no-events";
             return false;
             }
+      // far outside the range of the piece (pistons and toe studs that send a
+      // note, e.g. 95/96 on this console): not a played note at all
+      {
+            int lo = 127, hi = 0;
+            for (const Event& e : _events)
+                  for (int p : e.pitches) { lo = qMin(lo, p); hi = qMax(hi, p); }
+            if (pitch > hi + 12 || pitch < lo - 24) {
+                  _why = "outside the piece";
+                  return false;
+                  }
+      }
       if (!hasPosition())
             startAt(0);
       if (int(_v.size()) != int(_events.size()))
@@ -408,10 +434,12 @@ bool ScoreFollower::noteOnImpl(int pitch, qint64 ms)
             // (else every wrong note would be a cheap step forward).
             int spEnter;
             const double rEnter = reward(i, pitch, QSet<int>(), &spEnter, false);
-            double skipped = 0.0;
+            double further = 0.0;       // skip costs of k+2 .. i-1
             for (int k = i - 1; spEnter >= 0 && k >= qMax(lo, i - 1 - MAX_SKIP); --k) {
+                  // the event right after k may be passed by holding its notes
+                  const double skipped = k < i - 1 ? further + skipCost(k + 1, k) : 0.0;
                   if (k < i - 1)
-                        skipped += skipCost(k + 1);
+                        further += skipCost(k + 1, -1);
                   if (!alive(_v[k]))
                         continue;
                   const int sp = spEnter;
