@@ -15085,6 +15085,78 @@ This plugin requires an open score to run.</source>
         <source>Scroll at the end of the last line</source>
         <translation>Doorschuiven aan het eind van de laatste regel</translation>
     </message>
+    <message>
+        <source>Forget the learned MIDI keys</source>
+        <translation>Ingeleerde MIDI-toetsen vergeten</translation>
+    </message>
+    <message>
+        <source>The learned MIDI keys have been forgotten</source>
+        <translation>De ingeleerde MIDI-toetsen zijn vergeten</translation>
+    </message>
+    <message>
+        <source>Ignore the channel of the next key pressed</source>
+        <translation>Kanaal van de volgende toets negeren</translation>
+    </message>
+    <message>
+        <source>not set</source>
+        <translation>niet ingesteld</translation>
+    </message>
+    <message>
+        <source>note %1, channel %2</source>
+        <translation>noot %1, kanaal %2</translation>
+    </message>
+    <message>
+        <source>controller %1, channel %2</source>
+        <translation>controller %1, kanaal %2</translation>
+    </message>
+    <message>
+        <source>program %1, channel %2</source>
+        <translation>programma %1, kanaal %2</translation>
+    </message>
+    <message>
+        <source>Next System: learn MIDI key… (now: %1)</source>
+        <translation>Volgende regel: MIDI-toets inleren… (nu: %1)</translation>
+    </message>
+    <message>
+        <source>Reset: learn MIDI key… (now: %1)</source>
+        <translation>Opnieuw: MIDI-toets inleren… (nu: %1)</translation>
+    </message>
+    <message>
+        <source>Ignore MIDI channels</source>
+        <translation>MIDI-kanalen negeren</translation>
+    </message>
+    <message>
+        <source>Channel %1</source>
+        <translation>Kanaal %1</translation>
+    </message>
+    <message>
+        <source>MIDI input is off: switch it on to learn a MIDI key</source>
+        <translation>MIDI-invoer staat uit: zet die aan om een MIDI-toets in te leren</translation>
+    </message>
+    <message>
+        <source>Press a key on the keyboard (or pedal) whose channel is to be ignored…</source>
+        <translation>Druk op een toets van het klavier (of pedaal) waarvan het kanaal genegeerd moet worden…</translation>
+    </message>
+    <message>
+        <source>Press the MIDI key, piston or toe stud for &apos;%1&apos; now…</source>
+        <translation>Druk nu op de MIDI-toets, piston of teenpiston voor &apos;%1&apos;…</translation>
+    </message>
+    <message>
+        <source>Next System</source>
+        <translation>Volgende regel</translation>
+    </message>
+    <message>
+        <source>Nothing learned (no MIDI received)</source>
+        <translation>Niets ingeleerd (geen MIDI ontvangen)</translation>
+    </message>
+    <message>
+        <source>Channel %1 is now ignored while following</source>
+        <translation>Kanaal %1 wordt nu genegeerd bij het meelezen</translation>
+    </message>
+    <message>
+        <source>Learned: %1</source>
+        <translation>Ingeleerd: %1</translation>
+    </message>
 </context>
 <context>
     <name>Ms::MuseScoreApplication</name>
@@ -21292,30 +21364,6 @@ Het aanpassen van de latency kan helpen om MIDI-hardware te synchroniseren met M
         <location filename="../../mscore/prefsdialog.ui" line="4246"/>
         <source>Check for new version of MuseScore</source>
         <translation>Controleer op nieuwe versie van MuseScore</translation>
-    </message>
-    <message>
-        <source>Follow: next system</source>
-        <translation>Meelezen: volgende regel</translation>
-    </message>
-    <message>
-        <source>Follow: reset</source>
-        <translation>Meelezen: opnieuw</translation>
-    </message>
-    <message>
-        <source>Follow live playing: next system is active</source>
-        <translation>Meelezen: volgende regel is actief</translation>
-    </message>
-    <message>
-        <source>Follow live playing: next system record</source>
-        <translation>Meelezen: volgende regel opnemen</translation>
-    </message>
-    <message>
-        <source>Follow live playing: reset is active</source>
-        <translation>Meelezen: opnieuw is actief</translation>
-    </message>
-    <message>
-        <source>Follow live playing: reset record</source>
-        <translation>Meelezen: opnieuw opnemen</translation>
     </message>
 </context>
 <context>

@@ -2611,7 +2611,9 @@ void Seq::heartBeatTimeout()
                   else if (type == ME_NOTEOFF)
                         mscore->midiNoteReceived(msg.event.channel(), msg.event.pitch(), 0);
                   else if (type == ME_CONTROLLER)
-                        mscore->midiCtrlReceived(msg.event.controller(), msg.event.value());
+                        mscore->midiCtrlReceived(msg.event.channel(), msg.event.controller(), msg.event.value());
+                  else if (type == ME_PROGRAM)
+                        mscore->midiProgramReceived(msg.event.channel(), msg.event.dataA());
                   }
             }
 

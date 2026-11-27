@@ -1756,6 +1756,41 @@ MuseScore::MuseScore()
             preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_SCROLLAT, sa->data().toInt());
             });
 
+      // MIDI keys (or pistons) for Next System and Reset: learned with channel
+      _scoreFollowMenu->addSeparator();
+      _scoreFollowLearnNext  = _scoreFollowMenu->addAction(QString());
+      _scoreFollowLearnReset = _scoreFollowMenu->addAction(QString());
+      connect(_scoreFollowLearnNext,  &QAction::triggered, this, [this]() { scoreFollowLearn(FOLLOW_LEARN_NEXT); });
+      connect(_scoreFollowLearnReset, &QAction::triggered, this, [this]() { scoreFollowLearn(FOLLOW_LEARN_RESET); });
+      QAction* forget = _scoreFollowMenu->addAction(tr("Forget the learned MIDI keys"));
+      forget->setData(-1);
+      connect(forget, &QAction::triggered, this, [this]() {
+            preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER, QString());
+            preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER, QString());
+            showMessage(tr("The learned MIDI keys have been forgotten"), 4000);
+            });
+
+      // channels to ignore (e.g. the pedal, which is mostly not in the score)
+      _scoreFollowChannelMenu = _scoreFollowMenu->addMenu(QString());
+      QAction* learnIgnore = _scoreFollowChannelMenu->addAction(tr("Ignore the channel of the next key pressed"));
+      learnIgnore->setData(-1);
+      connect(learnIgnore, &QAction::triggered, this, [this]() { scoreFollowLearn(FOLLOW_LEARN_IGNORE); });
+      _scoreFollowChannelMenu->addSeparator();
+      for (int ch = 0; ch < 16; ++ch) {
+            QAction* ca = _scoreFollowChannelMenu->addAction(QString());
+            ca->setCheckable(true);
+            ca->setData(ch);
+            connect(ca, &QAction::toggled, this, [ch](bool on) {
+                  QStringList l = preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_IGNORECHANNELS).split(',', Qt::SkipEmptyParts);
+                  l.removeAll(QString::number(ch));
+                  if (on)
+                        l << QString::number(ch);
+                  preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_IGNORECHANNELS, l.join(','));
+                  });
+            }
+      connect(_scoreFollowMenu, &QMenu::aboutToShow, this, &MuseScore::updateScoreFollowMenu);
+      updateScoreFollowMenu();
+
       for (const char* name : { "score-follow", "score-follow-next", "score-follow-reset" }) {
             AccessibleToolButton* b = new AccessibleToolButton(followTools, getAction(name));
             if (!strcmp(name, "score-follow")) {
@@ -2649,8 +2684,10 @@ void MuseScore::retranslate()
                         case 0:  sa->setText(tr("Scroll at the start of the last line")); break;
                         case 50: sa->setText(tr("Scroll halfway through the last line")); break;
                         case 85: sa->setText(tr("Scroll at the end of the last line")); break;
+                        case -1: if (sa->isCheckable()) break; sa->setText(tr("Forget the learned MIDI keys")); break;
                         }
                   }
+            updateScoreFollowMenu();
             }
 
       _positionLabel->setToolTip(tr("Measure:Beat:Tick"));
@@ -3822,8 +3859,6 @@ bool MuseScore::processMidiRemote(MidiRemoteType type, int dta, int value)
                         case RMIDI_UNDO:    a = getAction("undo"); break;
                         case RMIDI_NOTE_EDIT_MODE: a = getAction("note-input");  break;
                         case RMIDI_REALTIME_ADVANCE: a = getAction("realtime-advance");  break;
-                        case RMIDI_SCORE_FOLLOW_NEXT: a = getAction("score-follow-next");  break;
-                        case RMIDI_SCORE_FOLLOW_RESET: a = getAction("score-follow-reset");  break;
 
                         }
                   if (a)
@@ -3852,8 +3887,12 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
       // the score follower must see every key release, also when a dialog is
       // open or the note is a remote control, so that no key stays "held"
       // (all channels: a MIDI bridge or the organ may use any channel, also 10)
-      if (!velo && _scoreFollower)
+      if (!velo && _scoreFollower && !scoreFollowIgnores(channel))
             _scoreFollower->noteOff(pitch);
+
+      // learned MIDI keys for Next System / Reset (and learning them)
+      if (scoreFollowMidiInput("note", channel, pitch, velo > 0))
+            return;
 
 // qDebug("midiNoteReceived %d %d %d", channel, pitch, velo);
 
@@ -3875,8 +3914,8 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
             active = 0;
             return;
             }
-      if (velo)
-            scoreFollowNoteOn(pitch);   // also updates the "lost" colour
+      if (velo && !scoreFollowIgnores(channel))
+            scoreFollowNoteOn(pitch);   // also updates the "lost" colour (ignored channels, e.g. the pedal, not)
 
       // While following live playing (outside note input) MuseScore must not play
       // the incoming keys itself: that sound goes out via MIDI and reaches the
@@ -3953,8 +3992,22 @@ void MuseScore::midiNoteReceived(int channel, int pitch, int velo)
 
 void MuseScore::midiCtrlReceived(int controller, int value)
       {
+      midiCtrlReceived(-1, controller, value);
+      }
+
+void MuseScore::midiCtrlReceived(int channel, int controller, int value)
+      {
       if (!isMidiInEnabled())
             return;
+      if (channel >= 0) {
+            // a controller counts as "pressed" only when it goes from 0 to more
+            // (a swell pedal sends many values: it must not fire every time)
+            int& last = _scoreFollowCtrlState[channel * 128 + controller];
+            const bool pressed = value > 0 && last <= 0;
+            last = value;
+            if (scoreFollowMidiInput("cc", channel, controller, pressed) || (value > 0 && !pressed && isScoreFollowTrigger("cc", channel, controller)))
+                  return;
+            }
       if (_midiRecordId != -1) {
             preferences.updateMidiRemote(_midiRecordId, MIDI_REMOTE_TYPE_CTRL, controller);
             _midiRecordId = -1;
@@ -3965,6 +4018,18 @@ void MuseScore::midiCtrlReceived(int controller, int value)
       // when value is 0 (usually when a key is released ) nothing happens
       if (processMidiRemote(MIDI_REMOTE_TYPE_CTRL, controller, value))
             return;
+      }
+
+//---------------------------------------------------------
+//   midiProgramReceived
+//    only used for the learned Follow Live Playing keys
+//    (some pistons send program changes)
+//---------------------------------------------------------
+
+void MuseScore::midiProgramReceived(int channel, int program)
+      {
+      if (isMidiInEnabled())
+            scoreFollowMidiInput("pc", channel, program, true);
       }
 
 //---------------------------------------------------------
@@ -7265,6 +7330,138 @@ void MuseScore::scoreFollowReset()
       _scoreFollowSelKey  = nullptr;
       _scoreFollowSelTick = Fraction(-1, 1);
       scoreFollowUpdateView();
+      }
+
+//---------------------------------------------------------
+//   scoreFollowIgnores
+//    MIDI channel (0-based) not followed, e.g. the pedal
+//---------------------------------------------------------
+
+bool MuseScore::scoreFollowIgnores(int channel) const
+      {
+      const QString l = preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_IGNORECHANNELS);
+      return !l.isEmpty() && l.split(',', Qt::SkipEmptyParts).contains(QString::number(channel));
+      }
+
+//---------------------------------------------------------
+//   scoreFollowTriggerText
+//    human readable form of a learned trigger ("type channel number")
+//---------------------------------------------------------
+
+QString MuseScore::scoreFollowTriggerText(const char* prefKey) const
+      {
+      const QStringList w = preferences.getString(prefKey).split(' ', Qt::SkipEmptyParts);
+      if (w.size() != 3)
+            return tr("not set");
+      const int ch = w[1].toInt() + 1;
+      const int n  = w[2].toInt();
+      if (w[0] == "note")
+            return tr("note %1, channel %2").arg(n).arg(ch);
+      if (w[0] == "cc")
+            return tr("controller %1, channel %2").arg(n).arg(ch);
+      return tr("program %1, channel %2").arg(n + 1).arg(ch);
+      }
+
+//---------------------------------------------------------
+//   updateScoreFollowMenu
+//---------------------------------------------------------
+
+void MuseScore::updateScoreFollowMenu()
+      {
+      if (!_scoreFollowMenu)
+            return;
+      _scoreFollowLearnNext->setText(tr("Next System: learn MIDI key… (now: %1)").arg(scoreFollowTriggerText(PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER)));
+      _scoreFollowLearnReset->setText(tr("Reset: learn MIDI key… (now: %1)").arg(scoreFollowTriggerText(PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER)));
+      _scoreFollowChannelMenu->setTitle(tr("Ignore MIDI channels"));
+      for (QAction* ca : _scoreFollowChannelMenu->actions()) {
+            if (!ca->isCheckable()) {
+                  if (ca->data().toInt() == -1)
+                        ca->setText(tr("Ignore the channel of the next key pressed"));
+                  continue;
+                  }
+            const int ch = ca->data().toInt();
+            ca->setText(tr("Channel %1").arg(ch + 1));
+            QSignalBlocker block(ca);
+            ca->setChecked(scoreFollowIgnores(ch));
+            }
+      }
+
+//---------------------------------------------------------
+//   scoreFollowLearn
+//    wait for the next MIDI key / controller / program change
+//---------------------------------------------------------
+
+void MuseScore::scoreFollowLearn(int what)
+      {
+      _scoreFollowLearning = what;
+      if (!isMidiInEnabled())
+            showMessage(tr("MIDI input is off: switch it on to learn a MIDI key"), 6000);
+      else if (what == FOLLOW_LEARN_IGNORE)
+            showMessage(tr("Press a key on the keyboard (or pedal) whose channel is to be ignored…"), 15000);
+      else
+            showMessage(tr("Press the MIDI key, piston or toe stud for '%1' now…")
+                        .arg(what == FOLLOW_LEARN_NEXT ? tr("Next System") : tr("Reset")), 15000);
+      const int session = ++_scoreFollowLearnSession;
+      QTimer::singleShot(15000, this, [this, what, session]() {
+            if (_scoreFollowLearning == what && _scoreFollowLearnSession == session) {
+                  _scoreFollowLearning = FOLLOW_LEARN_NONE;
+                  showMessage(tr("Nothing learned (no MIDI received)"), 4000);
+                  }
+            });
+      }
+
+//---------------------------------------------------------
+//   isScoreFollowTrigger
+//---------------------------------------------------------
+
+bool MuseScore::isScoreFollowTrigger(const char* type, int channel, int number) const
+      {
+      const QString key = QString("%1 %2 %3").arg(type).arg(channel).arg(number);
+      return key == preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER)
+             || key == preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER);
+      }
+
+//---------------------------------------------------------
+//   scoreFollowMidiInput
+//    Learn a MIDI message, or recognise a learned one.
+//    type: "note", "cc" or "pc"; channel 0-based; on: note-on /
+//    controller value > 0 / program change. Returns true when
+//    the message was used up (it is then not played or followed).
+//---------------------------------------------------------
+
+bool MuseScore::scoreFollowMidiInput(const char* type, int channel, int number, bool on)
+      {
+      const QString key = QString("%1 %2 %3").arg(type).arg(channel).arg(number);
+      if (_scoreFollowLearning != FOLLOW_LEARN_NONE) {
+            if (!on)
+                  return false;           // a release of a key pressed before learning
+            const int what = _scoreFollowLearning;
+            if (what == FOLLOW_LEARN_IGNORE && strcmp(type, "note"))
+                  return false;           // wait for a key, a swell pedal does not count
+            _scoreFollowLearning = FOLLOW_LEARN_NONE;
+            if (what == FOLLOW_LEARN_IGNORE) {
+                  QStringList l = preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_IGNORECHANNELS).split(',', Qt::SkipEmptyParts);
+                  if (!l.contains(QString::number(channel)))
+                        l << QString::number(channel);
+                  preferences.setPreference(PREF_APP_PLAYBACK_SCOREFOLLOW_IGNORECHANNELS, l.join(','));
+                  showMessage(tr("Channel %1 is now ignored while following").arg(channel + 1), 5000);
+                  return true;
+                  }
+            const char* pref = what == FOLLOW_LEARN_NEXT ? PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER
+                                                         : PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER;
+            preferences.setPreference(pref, key);
+            showMessage(tr("Learned: %1").arg(scoreFollowTriggerText(pref)), 5000);
+            return true;
+            }
+      if (!isScoreFollowTrigger(type, channel, number))
+            return false;
+      const bool isNext  = key == preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_NEXTTRIGGER);
+      const bool isReset = !isNext && key == preferences.getString(PREF_APP_PLAYBACK_SCOREFOLLOW_RESETTRIGGER);
+      if (!isNext && !isReset)
+            return false;
+      if (on && !QApplication::activeModalWidget())
+            getAction(isNext ? "score-follow-next" : "score-follow-reset")->trigger();
+      return true;                    // also its release: the key is a button now
       }
 
 //---------------------------------------------------------

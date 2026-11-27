@@ -28,11 +28,26 @@ class Score;
 
 //---------------------------------------------------------
 //   ScoreFollower
-//    Follows live MIDI input (a musician playing from the
-//    score) and keeps track of the position in the score.
-//    Only note-on events are used; there is no timing model,
-//    the follower just matches pitches against the expected
-//    chords, with a small look-ahead window.
+//    Follows a musician playing live (MIDI note-ons) from the
+//    score and keeps track of the position, so the view can
+//    scroll along.
+//
+//    The score is a list of events: the pitches struck at one
+//    moment (repeats unrolled). Matching is an on-line dynamic
+//    programming alignment (after Dannenberg's score follower):
+//    for every event near the position a score is kept of how
+//    well everything played so far fits "the player is here".
+//    Each note updates all of them at once:
+//      - a note of the event (not yet played there): + MATCH
+//      - one octave from one (pedal 16'), current only: + OCTAVE
+//      - anything else (wrong, repeated, extra):      + EXTRA (< 0)
+//      - entering the next event costs ENTER, every event
+//        skipped on the way costs (per note, up to a whole chord).
+//    Wrong notes cost every position the same and move nothing;
+//    a skipped or optional note costs one SKIP; held notes cost
+//    nothing; a repeated chord is entered by its new attack. If
+//    the shown position was wrong, the right one keeps gaining
+//    and takes over again (hysteresis against flicker).
 //---------------------------------------------------------
 
 class ScoreFollower {
@@ -40,7 +55,32 @@ class ScoreFollower {
       struct Event {
             Fraction tick;          // score tick (not unrolled)
             QSet<int> pitches;      // pitches struck at this position
+            bool optional { false };// only notes in parentheses: may be skipped for free
             };
+
+      // alignment weights (tuned with tools/scorefollower-test: a real recording of
+      // Psalm 25 and the stress tests; "inline" so the test tool can vary them)
+      static inline double MATCH       =  1.0;
+      static inline double OCTAVE      =  0.6;
+      static inline double EXTRA       = -0.5;
+      static inline double ENTER       = -0.1;
+      static inline double SKIP_PER_NOTE = 1.0;  // passing an event unplayed costs this per note ...
+      static inline double SKIP_SINGLE =  0.5;   // ... a single (passing) note: this ...
+      static inline double SKIP_MAX    =  3.5;   // ... at most this (a whole chord)
+      static inline double FWD_MARGIN  =  0.4;  // a position ahead must lead by this ...
+      static inline double FWD_PER_NOTE = 0.4;   // ... plus this per note of its chord after the first (max 4) ...
+      // (... plus the skip costs of what lies between, see forwardMargin())
+      static inline double BACK_MARGIN =  2.0;   // a position behind must lead by this to be shown
+      static constexpr int MAX_SKIP       = 3;      // events that may be skipped in one step
+      static constexpr int AHEAD          = 8;      // events kept alive ahead of the shown position
+      static constexpr int BEHIND         = 6;      // ... and behind it
+
+      static constexpr int LOST_MISSES    = 6;      // notes in a row that fit nowhere: lost
+      static constexpr int STRIKE_MS      = 150;    // notes within this time form one strike
+      static constexpr int VERSE_TAIL     = 2;      // last events from which the first chord means "next verse"
+      static constexpr int VERSE_PAUSE_MS = 1200;   // silence before the opening chord that marks a new verse
+      static constexpr int HELD_EXPIRE_MS = 20000;  // forget a held key after this time (lost note-off)
+      static constexpr qint64 LOG_MAX_BYTES = 5 * 1024 * 1024;
 
    private:
       struct Attack {
@@ -53,32 +93,20 @@ class ScoreFollower {
       bool _repeats        { true };    // repeat expansion the event list was built for
       std::vector<Event> _events;
 
-      int _cur             { -1 };      // index of the current event, -1 = not started
-      QSet<int> _matched;               // score pitches of _cur already consumed
-      // evidence: for candidate events near _cur, the pitches recently played that
-      // belong to them (pitch -> time). Cleared on every move.
-      struct Evidence {
-            qint64 time;
-            bool explained;           // the attack also fitted the current chord
-            };
-      QHash<int, QHash<int, Evidence>> _evidence;
-      // attacks since the last move that did not fit the current chord: a
-      // candidate must explain most of them, so a burst of wrong notes that
-      // happens to hit a chord ahead does not move the position
-      std::vector<Attack> _attacks;
-      std::vector<Attack> _recent;      // all recent attacks (for "which chord was just struck")
-      // A jump other than to the next chord must be confirmed by a second,
-      // separate strike: one deviating chord is not enough to jump.
-      int _farCand         { -1 };      // event the previous strike pointed to (confirmed by a strike on the next one)
-      qint64 _farCandTime  { 0 };       // when that strike began
+      // alignment state, per event (only [_lo, _hi] is alive)
+      std::vector<double> _v;           // score of "the player is at this event"
+      std::vector<QSet<int>> _used;     // pitches of the event already played on that path
+      int _lo              { 0 };
+      int _hi              { -1 };
+      int _cur             { -1 };      // shown position, -1 = not started
 
-      int _stuck           { 0 };       // attacks without progress (for lost())
-      QHash<int, qint64> _held;         // pitches currently down -> time pressed
-      qint64 _now          { 0 };       // time of the note being processed (ms)
-      qint64 _lastMove     { -1000000 };// time of the last forward move (ms)
+      int _stuck           { 0 };       // notes in a row without a match on the best path
+      QHash<int, qint64> _held;         // keys down -> time pressed
+      std::vector<Attack> _recent;      // recent attacks (strikes, verse pause)
+      qint64 _now          { 0 };
       QElapsedTimer _clock;
 
-      // diagnostic log (what came in, what was decided and why)
+      // diagnostic log
       QFile* _log          { nullptr };
       int _logLines        { 0 };
       QString _why;
@@ -86,13 +114,10 @@ class ScoreFollower {
       bool needsRebuild() const;
       bool ensureEvents();
       void rebuild();
-      void setCurrent(int idx, const QSet<int>& consumed);
-      int matchPitch(int idx, int pitch, const QSet<int>& consumed, bool octave) const;
-      int evidenceCount(int idx, bool* unexplained = nullptr, qint64* first = nullptr, qint64* last = nullptr) const;
-      int needed(int idx) const;
-      bool farPending() const;
-      bool struckBefore(int idx, int need, qint64 before) const;
-      int chooseCandidate();
+      void startAt(int idx);
+      double reward(int idx, int pitch, const QSet<int>& used, int* scorePitch, bool octave) const;
+      double forwardMargin(int j) const;
+      double skipCost(int idx) const;
       QSet<int> lastStrike() const;
       bool nextVerse();
       int nearestRun(const Fraction& tick, int hint) const;
@@ -101,18 +126,6 @@ class ScoreFollower {
       void logEvents();
 
    public:
-      static constexpr int WINDOW         = 3;   // look-ahead in events (bigger skips: click, Reset, Next System)
-      static constexpr int BACK           = 4;   // look-back in events (recover from a false advance)
-      static constexpr int EVIDENCE_MS    = 1500;// played pitches count as evidence this long
-      static constexpr int STRIKE_MS      = 150; // a chord further away must be struck together within this time
-      static constexpr int RATIO_ATTACKS  = 4;   // last attacks a candidate must mostly explain
-      static constexpr int LOST_MISSES    = 6;   // attacks without progress before we call ourselves lost
-      static constexpr int VERSE_TAIL     = 2;   // last events from which the first chord means "next verse"
-      static constexpr int VERSE_PAUSE_MS = 1200;// silence before the opening chord that marks a new verse
-      static constexpr int CHORD_MS       = 60;  // notes within this time after a move belong to the same chord
-      static constexpr qint64 LOG_MAX_BYTES = 5 * 1024 * 1024;
-      static constexpr int HELD_EXPIRE_MS = 20000; // forget a held key after this time (lost note-off)
-
       ScoreFollower() { _clock.start(); }
       ~ScoreFollower();
 
@@ -121,35 +134,33 @@ class ScoreFollower {
       void reset();
 
       // Positions the follower at (the first event at or after) tick.
-      // Returns true when a position was found.
       bool setPosition(const Fraction& tick);
-
       // Back to the very first chord of the score.
       bool restart();
+      // Moves forward to the first event at or after tick; a repeat jump on
+      // the way counts as destination. Never moves backward.
+      bool advanceTo(const Fraction& tick);
 
-      // Feed a note-on. Returns true when the position changed.
+      // Feed a note-on / note-off. noteOn returns true when the shown position changed.
       bool noteOn(int pitch)               { return noteOn(pitch, _clock.elapsed()); }
       bool noteOn(int pitch, qint64 ms);
       void noteOff(int pitch)              { noteOff(pitch, _clock.elapsed()); }
       void noteOff(int pitch, qint64 ms);
 
-      // Moves forward to the first event at or after tick; a repeat jump on
-      // the way counts as destination. Never moves backward.
-      bool advanceTo(const Fraction& tick);
-
       bool hasPosition() const { return _cur >= 0 && _cur < int(_events.size()); }
-      // several attacks in a row did not fit where we think the player is
+      // several notes in a row fitted nowhere near the position
       bool lost() const        { return hasPosition() && _stuck >= LOST_MISSES; }
       Fraction tick() const    { return hasPosition() ? _events[_cur].tick : Fraction(-1, 1); }
 
-      // Write a diagnostic log (empty path: off). Every rebuild writes the
-      // chord list, every note what was decided; the test tool can replay it.
+      // Diagnostic log (empty path: off): the chord list on every rebuild and
+      // every note with the decision; the test tool can replay it.
       void setLogFile(const QString& path);
 
       // for testing
       void setEvents(const std::vector<Event>& ev);
       int currentIndex() const { return _cur; }
       const QString& lastReason() const { return _why; }
+      QString debugState() const;
       };
 
 } // namespace Ms

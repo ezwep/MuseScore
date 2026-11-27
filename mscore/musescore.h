@@ -276,7 +276,14 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       const void* _scoreFollowSelKey       { nullptr };   // selection the follower was last anchored to (compared only)
       Fraction _scoreFollowSelTick         { -1, 1 };
       QPointer<ScoreView> _scoreFollowView;               // view showing the follow cursor
-      QMenu* _scoreFollowMenu              { nullptr };   // "when to scroll" choices
+      QMenu* _scoreFollowMenu              { nullptr };   // "when to scroll" choices, MIDI learning, channels
+      QAction* _scoreFollowLearnNext       { nullptr };
+      QAction* _scoreFollowLearnReset      { nullptr };
+      QMenu* _scoreFollowChannelMenu       { nullptr };
+      enum { FOLLOW_LEARN_NONE, FOLLOW_LEARN_NEXT, FOLLOW_LEARN_RESET, FOLLOW_LEARN_IGNORE };
+      int _scoreFollowLearning             { FOLLOW_LEARN_NONE };   // waiting for a MIDI message to learn
+      int _scoreFollowLearnSession         { 0 };
+      QHash<int, int> _scoreFollowCtrlState;                        // last value per channel*128+controller
       QSet<int> _midiInPassed;                            // keys whose note-on went to the score view (so their note-off does too)
 
 
@@ -520,6 +527,12 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       void setScoreFollow(bool on);
       void scoreFollowNext();
       void scoreFollowReset();
+      bool scoreFollowMidiInput(const char* type, int channel, int number, bool on);
+      bool scoreFollowIgnores(int channel) const;
+      void scoreFollowLearn(int what);
+      void updateScoreFollowMenu();
+      QString scoreFollowTriggerText(const char* prefKey) const;
+      bool isScoreFollowTrigger(const char* type, int channel, int number) const;
 
       void scoreFollowSelectionChanged();
       void scoreFollowUpdateView();
@@ -659,6 +672,8 @@ class MuseScore : public QMainWindow, public MuseScoreCore {
       QMenu* genCreateMenu(QWidget* parent = 0);
       virtual int appendScore(MasterScore*) override;
       void midiCtrlReceived(int controller, int value);
+      void midiCtrlReceived(int channel, int controller, int value);
+      void midiProgramReceived(int channel, int program);
       void showElementContext(Element* el);
       void cmdAppendMeasures(int);
       bool isMidiInEnabled() const;
