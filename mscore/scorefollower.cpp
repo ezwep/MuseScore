@@ -28,11 +28,13 @@
 #include "libmscore/part.h"
 #include "libmscore/repeatlist.h"
 #include "libmscore/undo.h"
+#include "libmscore/symbol.h"
 
 namespace Ms {
 
 static constexpr double NONE = -1e9;      // a position that is not alive
 static inline bool alive(double v) { return v > NONE / 2; }
+static bool hasParentheses(const Note* n);
 
 //---------------------------------------------------------
 //   ~ScoreFollower
@@ -154,7 +156,7 @@ void ScoreFollower::rebuild()
                                     if (n->tieBack() || !n->play())
                                           continue;
                                     ev.pitches.insert(n->ppitch());
-                                    allGhost = allGhost && n->ghost();
+                                    allGhost = allGhost && (n->ghost() || hasParentheses(n));
                                     }
                               }
                         ev.optional = allGhost;
@@ -172,6 +174,24 @@ void ScoreFollower::rebuild()
                   startAt(idx);
             }
       logEvents();
+      }
+
+//---------------------------------------------------------
+//   hasParentheses
+//    a note with parenthesis symbols around it (Add parentheses):
+//    written as optional, like a ghost note
+//---------------------------------------------------------
+
+static bool hasParentheses(const Note* n)
+      {
+      for (const Element* e : n->el()) {
+            if (e->isSymbol()) {
+                  const SymId id = toSymbol(e)->sym();
+                  if (id == SymId::noteheadParenthesisLeft || id == SymId::noteheadParenthesisRight)
+                        return true;
+                  }
+            }
+      return false;
       }
 
 //---------------------------------------------------------
@@ -655,6 +675,8 @@ void ScoreFollower::logEvents()
       {
       if (!_log)
             return;
+      if (_score)
+            logLine(QString("SCORE %1").arg(_score->masterScore()->fileInfo()->completeBaseName()));
       logLine(QString("EVENTS %1").arg(_events.size()));
       for (size_t i = 0; i < _events.size(); ++i) {
             QList<int> ps = _events[i].pitches.values();
