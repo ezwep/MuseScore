@@ -205,6 +205,7 @@ void ScoreFollower::startAt(int idx)
       _v.assign(n, NONE);
       _used.assign(n, QSet<int>());
       _stuck = 0;
+      _stray = false;
       _cur = idx;
       if (idx < 0 || idx >= n) {
             _cur = -1;
@@ -214,7 +215,7 @@ void ScoreFollower::startAt(int idx)
             }
       _v[idx] = 0.0;
       _lo = qMax(0, idx - BEHIND);
-      _hi = qMin(n - 1, idx + AHEAD);
+      _hi = aheadLimit(idx);
       }
 
 //---------------------------------------------------------
@@ -250,6 +251,63 @@ double ScoreFollower::skipCost(int idx, int from) const
       }
 
 //---------------------------------------------------------
+//   aheadLimit
+//    last event kept alive ahead of 'from': AHEAD events,
+//    optional ones (free to pass) not counted
+//---------------------------------------------------------
+
+int ScoreFollower::aheadLimit(int from) const
+      {
+      const int n = int(_events.size());
+      int hi = from, count = 0;
+      while (hi + 1 < n && count < AHEAD) {
+            ++hi;
+            if (!_events[hi].optional)
+                  ++count;
+            }
+      return hi;
+      }
+
+//---------------------------------------------------------
+//   strayInStrike
+//    is pitch a stray note in the chord being struck right now:
+//    not of the current chord (nor an octave of it), while that
+//    chord is unfinished and at least two earlier notes of this
+//    strike were played there?
+//---------------------------------------------------------
+
+bool ScoreFollower::strayInStrike(int pitch) const
+      {
+      if (!hasPosition() || _cur >= int(_used.size()))
+            return false;
+      const QSet<int>& cur = _events[_cur].pitches;
+      if (cur.contains(pitch) || cur.contains(pitch + 12) || cur.contains(pitch - 12))
+            return false;
+      if (_used[_cur].size() >= cur.size())
+            return false;     // the chord is complete: on to the next one
+      // the earlier notes of this strike (the last attack is the note now)
+      QSet<int> strike;
+      for (int i = 0; i + 1 < int(_recent.size()); ++i)
+            if (_now - _recent[i].time <= STRIKE_MS)
+                  strike.insert(_recent[i].pitch);
+      // the score pitches of the current chord they were played as (_used
+      // holds score pitches: a pedal octave counts, unless the pitch itself
+      // was struck too)
+      const QSet<int>& u = _used[_cur];
+      QSet<int> played;
+      for (int p : strike) {
+            if (u.contains(p))
+                  played.insert(p);
+            else {
+                  for (int q : { p + 12, p - 12 })
+                        if (u.contains(q) && !strike.contains(q))
+                              played.insert(q);
+                  }
+            }
+      return played.size() >= 2;
+      }
+
+//---------------------------------------------------------
 //   forwardMargin
 //    lead over the shown position that event j ahead needs to
 //    be shown: more for a bigger chord, plus what lies between
@@ -259,11 +317,14 @@ double ScoreFollower::forwardMargin(int j) const
       {
       // keys still held down that belong to event j count as present: an
       // organist holds a repeated note instead of re-striking it (Psalm 25,
-      // bar 4: the F held, only the A struck again)
+      // bar 4: the F held, only the A struck again). Not for a stray note
+      // in the chord being struck: with keys released late after an earlier
+      // chord it would move on alone (Gezang 1, Erik 28-11: "one other note
+      // and it runs ahead").
       int present = 0;
       for (int p : _events[j].pitches) {
             auto h = _held.constFind(p);
-            if (h != _held.constEnd() && _now - h.value() < HELD_EXPIRE_MS && !_used[j].contains(p))
+            if (!_stray && h != _held.constEnd() && _now - h.value() < HELD_EXPIRE_MS && !_used[j].contains(p))
                   ++present;
             }
       const int size = qMax(1, qMin(4, int(_events[j].pitches.size()) - present));
@@ -433,7 +494,7 @@ bool ScoreFollower::noteOnImpl(int pitch, qint64 ms)
       // --- update every live position ---------------------------------
       const int n  = int(_events.size());
       const int lo = qMax(0, _cur - BEHIND);
-      const int hi = qMin(n - 1, _cur + AHEAD);
+      const int hi = aheadLimit(_cur);
       std::vector<double> nv(n, NONE);
       std::vector<QSet<int>> nused(n);
       std::vector<bool> nmatch(n, false);
@@ -455,7 +516,12 @@ bool ScoreFollower::noteOnImpl(int pitch, qint64 ms)
             int spEnter;
             const double rEnter = reward(i, pitch, QSet<int>(), &spEnter, false);
             double further = 0.0;       // skip costs of k+2 .. i-1
-            for (int k = i - 1; spEnter >= 0 && k >= qMax(lo, i - 1 - MAX_SKIP); --k) {
+            int passed = 0;             // events passed on the way, optional ones not counted
+            for (int k = i - 1; spEnter >= 0 && k >= lo; --k) {
+                  // at most MAX_SKIP events in one step; optional events (notes in
+                  // parentheses, often several in a row) are free to pass and do not count
+                  if (k < i - 1 && !_events[k + 1].optional && ++passed > MAX_SKIP)
+                        break;
                   // the event right after k may be passed by holding its notes
                   const double skipped = k < i - 1 ? further + skipCost(k + 1, k) : 0.0;
                   if (k < i - 1)
@@ -503,6 +569,7 @@ bool ScoreFollower::noteOnImpl(int pitch, qint64 ms)
 
       // --- the shown position follows the best one, with hysteresis ----
       _stuck = nmatch[b] ? 0 : _stuck + 1;
+      _stray = strayInStrike(pitch);
       const int old = _cur;
       if (b > _cur) {
             // a chord needs two of its notes before it is shown (a single

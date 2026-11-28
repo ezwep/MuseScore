@@ -203,11 +203,12 @@ static std::vector<int> idealPath(const std::vector<ScoreFollower::Event>& ev, c
                         best = V[t][i] + r; bf = i; bu = used[t][i]; if (sp >= 0) bu.insert(sp);
                         }
                   double skipped = 0;
-                  for (int k = i - 1; k >= qMax(start, i - 1 - ScoreFollower::MAX_SKIP); --k) {
+                  int passed = 0;         // as the follower: optional events do not count for MAX_SKIP
+                  int sp; const double r = offReward(ev[i], notes[t].pitch, QSet<int>(), &sp);
+                  for (int k = i - 1; sp >= 0 && k >= start; --k) {   // enter an event only with one of its notes
+                        if (k < i - 1 && !ev[k + 1].optional && ++passed > ScoreFollower::MAX_SKIP) break;
                         if (k < i - 1) skipped += offSkip(ev[k + 1]);
                         if (V[t][k] <= NEG / 2) continue;
-                        int sp; double r = offReward(ev[i], notes[t].pitch, QSet<int>(), &sp);
-                        if (sp < 0) continue;     // enter an event only with one of its notes
                         double val = V[t][k] + ScoreFollower::ENTER - skipped + r;
                         if (val > best) { best = val; bf = k; bu.clear(); if (sp >= 0) bu.insert(sp); }
                         }
@@ -254,7 +255,7 @@ static void evaluateBlock(const std::vector<ScoreFollower::Event>& events,
                   ++total;
                   if (d == 0) ++same; else if (d > 0) ++ahead; else ++behind;
                   maxLead = qMax(maxLead, d); maxLag = qMax(maxLag, -d);
-                  if (qEnvironmentVariableIsSet("SF_STATE") && qAbs(d) >= 2)
+                  if (qEnvironmentVariableIsSet("SF_STATE") && qAbs(d) >= qMax(1, qEnvironmentVariableIntValue("SF_STATE")))
                         printf("  block %d t=%lld note %d: follower %d, ideal %d (%+d)\n", blockNo, notes[t].time, notes[t].pitch, online[t], ideal[t], d);
                   }
             }
@@ -494,6 +495,43 @@ int main(int argc, char** argv) {
       reset(f, rec); chord(f,{40});
       for (int p : {48,49,50,51,52,53,54,55}) chord(f, {p});
       CHECK(f.currentIndex()==0 && f.lost(), "far away: no automatic jump, the cursor says lost (click a note)");
+
+      // optional notes (in parentheses): four in a row are passed in one step
+      // (Gezang 1, bar 9: a run of four notes in parentheses after the C chord)
+      {
+            std::vector<ScoreFollower::Event> g = { ev(0,{48,52,55,60}), ev(960,{62}), ev(1200,{64}), ev(1440,{65}), ev(1680,{67}),
+                                                     ev(1920,{53,60,65,69}), ev(2880,{52,60,67,70}) };
+            for (int i = 1; i <= 4; ++i) g[i].optional = true;
+            reset(f, g); chord(f, {48,52,55,60});
+            chord(f, {53,69,65,41}); CHECK(f.currentIndex()==5, "four optional notes in a row are skipped at once");
+            chord(f, {52,60,67,70}); CHECK(f.currentIndex()==6, "and on");
+            // a longer run than the window ahead (AHEAD does not count optional events)
+            std::vector<ScoreFollower::Event> h = { ev(0,{48,52,55,60}) };
+            for (int i = 0; i < 10; ++i) { h.push_back(ev(960 + 240*i, {72 + i})); h.back().optional = true; }
+            h.push_back(ev(4000,{53,60,65,69}));
+            reset(f, h); chord(f, {48,52,55,60});
+            chord(f, {53,69,65,41}); CHECK(f.currentIndex()==11, "ten optional notes in a row are skipped too");
+      }
+      // a stray note in the chord being struck, with a key of an earlier chord
+      // still held, does not move on (Gezang 1, Erik 28-11)
+      {
+            std::vector<ScoreFollower::Event> g = { ev(0,{53,67,69}), ev(480,{57,65}), ev(960,{48,60,64,67}),
+                                                     ev(1920,{53,60,65,69}), ev(2880,{52,60,67,70}) };
+            reset(f, g);
+            qint64 t = now + 500;
+            f.noteOn(53, t); f.noteOn(69, t + 30); f.noteOn(67, t + 40);     // chord 1, the 69 stays down
+            t += 1400; f.noteOff(53, t); f.noteOff(67, t); f.noteOn(65, t + 5); f.noteOn(57, t + 90);
+            CHECK(f.currentIndex()==1, "stray: chord 2");
+            t += 1700; f.noteOff(65, t - 500); f.noteOn(67, t); f.noteOn(48, t + 60); f.noteOn(65, t + 61);
+            CHECK(f.currentIndex()==2, "stray: a wrong 65 in chord 3 (69 held from chord 1) does not jump to chord 4");
+            f.noteOff(69, t + 90); f.noteOff(57, t + 90);
+            t += 1300; f.noteOn(64, t); f.noteOn(60, t + 20);
+            CHECK(f.currentIndex()==2, "stray: chord 3 completed");
+            t += 1000; f.noteOff(67, t); f.noteOff(48, t); f.noteOff(65, t); f.noteOff(64, t); f.noteOff(60, t);
+            f.noteOn(53, t + 10); f.noteOn(60, t + 20); f.noteOn(65, t + 30); f.noteOn(69, t + 40);
+            CHECK(f.currentIndex()==3, "stray: then chord 4");
+            now = t + 100;
+      }
 
       // stress: generated 4-voice piece (stepwise voices), played with random
       // wrong notes and fumbled chords

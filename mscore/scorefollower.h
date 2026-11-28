@@ -72,7 +72,7 @@ class ScoreFollower {
       // (... plus the skip costs of what lies between, see forwardMargin())
       static inline double BACK_MARGIN =  2.0;   // a position behind must lead by this to be shown
       static constexpr int MAX_SKIP       = 3;      // events that may be skipped in one step
-      static constexpr int AHEAD          = 8;      // events kept alive ahead of the shown position
+      static constexpr int AHEAD          = 8;      // events kept alive ahead of the shown position (optional ones not counted)
       static constexpr int BEHIND         = 6;      // ... and behind it
 
       static constexpr int LOST_MISSES    = 6;      // notes in a row that fit nowhere: lost
@@ -101,6 +101,7 @@ class ScoreFollower {
       int _cur             { -1 };      // shown position, -1 = not started
 
       int _stuck           { 0 };       // notes in a row without a match on the best path
+      bool _stray          { false };   // the note now is a stray one in the chord being struck
       QHash<int, qint64> _held;         // keys down -> time pressed
       std::vector<int> _mistakes;       // wrong notes per event (practice overview)
       std::vector<Attack> _recent;      // recent attacks (strikes, verse pause)
@@ -118,6 +119,8 @@ class ScoreFollower {
       void startAt(int idx);
       double reward(int idx, int pitch, const QSet<int>& used, int* scorePitch, bool octave) const;
       double forwardMargin(int j) const;
+      bool strayInStrike(int pitch) const;
+      int aheadLimit(int from) const;
       double skipCost(int idx, int from) const;
       QSet<int> lastStrike() const;
       bool nextVerse();
